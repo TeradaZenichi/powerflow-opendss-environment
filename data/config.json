@@ -1,0 +1,11 @@
+{
+    "settings":{
+        "timestep": 5
+    },
+    "BESS": {
+        "Pmax": 5,
+        "Emax": 10,
+        "eff": 0.99,
+        "SoC0": 0.5
+    }
+}
