@@ -6,6 +6,7 @@ for the simulation.
 import json
 from pathlib import Path
 import pandas as pd
+import re
 
 from .elements import BESS, PV, Load
 
@@ -19,8 +20,12 @@ def load_data(path):
     with open(path / "config.json", "r", encoding="utf-8") as f:
         cfg = json.load(f)
     base_kv = cfg["base"]["v_base_kv"]
-    topology = path / cfg["network"]["master"]
 
+    # circuit and line data
+    topology = path / cfg["network"]["master"]
+    with open(topology, "r", encoding="utf-8") as f:
+        phases = int(re.search(r"phases\s*=\s*(\d+)", f.read(), re.IGNORECASE).group(1))
+    
     # devices.json
     with open(path / "devices.json", "r", encoding="utf-8") as f:
         devices = json.load(f)
@@ -34,4 +39,4 @@ def load_data(path):
         
     # demand.csv
     demand = pd.read_csv(path / "demand.csv")
-    return {"steps": steps, "base_kv": base_kv, "bess_list": bess_list, "pv_list": pv_list, "demand": demand, "topology": topology}
+    return {"steps": steps, "phases": phases, "base_kv": base_kv, "bess_list": bess_list, "pv_list": pv_list, "demand": demand, "topology": topology}

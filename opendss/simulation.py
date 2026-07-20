@@ -17,18 +17,18 @@ def run_simulation(data):
     # PV generators
     for pv in data["pv_list"]:
         dss.text(f"""
-        New Generator.{pv.id} bus1={pv.bus} phases=1 kv={data["base_kv"]} kw=0 kvar=0
+        New Generator.{pv.id} bus1={pv.bus} phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0
         """)
 
     # BESS
     for bess in data["bess_list"]:
         dss.text(f"""
-        New Load.{bess.id} bus={bess.bus} phases=1 kv={data["base_kv"]} kw=0 kvar=0 conn=y
+        New Load.{bess.id} bus={bess.bus} phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0 conn=y
         """)
 
     # Load demand
     dss.text(f"""
-    New Load.Load1 bus1=bus_005 phases=1 kv={data["base_kv"]} kw=0 kvar=0
+    New Load.Load1 bus1=bus_005 phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0
     """)
 
     # =============================================================================
