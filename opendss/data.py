@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import pandas as pd
 
-from elements import BESS, PV, Load
+from .elements import BESS, PV, Load
 
 def load_data(path):
     path = Path(path).expanduser().resolve()
@@ -35,7 +35,3 @@ def load_data(path):
     # demand.csv
     demand = pd.read_csv(path / "demand.csv")
     return {"steps": steps, "base_kv": base_kv, "bess_list": bess_list, "pv_list": pv_list, "demand": demand, "topology": topology}
-
-# TESTES, APAGAR DEPOIS
-data = load_data("../examples/case5")
-print(data["pv_list"][0].profile)
