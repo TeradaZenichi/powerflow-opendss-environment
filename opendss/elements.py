@@ -21,3 +21,10 @@ class BESS:
         self.eta_charge, self.eta_discharge = eta_charge, eta_discharge
         self.soc_init_frac, self.soc_min_frac, self.soc_max_frac = soc_init_frac, soc_min_frac, soc_max_frac
         self.cyclic_soc = cyclic_soc
+
+class Grid:
+    def __init__(self, prices):
+        self.prices = prices
+        self.array_kw = None
+        self.array_kvar = None
+        

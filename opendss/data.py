@@ -8,13 +8,17 @@ from pathlib import Path
 import pandas as pd
 import re
 
-from .elements import BESS, PV, Load
+from .elements import BESS, PV, Load, Grid
 
 def load_data(path):
     path = Path(path).expanduser().resolve()
 
     if not path.is_dir():
         raise FileNotFoundError(f"File not found: {path}")
+    
+    # prices.csv
+    prices = pd.read_csv(path / "price.csv")["price_per_kwh"].to_numpy()
+    grid = Grid(prices)
 
     # config.json
     with open(path / "config.json", "r", encoding="utf-8") as f:
@@ -53,4 +57,4 @@ def load_data(path):
                     array_kvar=demand[q_col].to_numpy()
                 )
             )
-    return {"steps": steps, "phases": phases, "base_kv": base_kv, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology}
+    return {"steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology}
