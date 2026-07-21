@@ -39,4 +39,18 @@ def load_data(path):
         
     # demand.csv
     demand = pd.read_csv(path / "demand.csv")
-    return {"steps": steps, "phases": phases, "base_kv": base_kv, "bess_list": bess_list, "pv_list": pv_list, "demand": demand, "topology": topology}
+    load_list = []
+    for col in demand.columns:
+        if col.startswith("Pbus_"):
+            bus = col[1:]              # "Pbus_005" -> "bus_005"
+            q_col = f"Q{bus}"          # "Qbus_005"
+    
+            load_list.append(
+                Load(
+                    id=f"Load_{bus}",
+                    bus=bus,
+                    array_kw=demand[col].to_numpy(),
+                    array_kvar=demand[q_col].to_numpy()
+                )
+            )
+    return {"steps": steps, "phases": phases, "base_kv": base_kv, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology}

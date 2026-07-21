@@ -53,5 +53,5 @@ def plot_power_flow(data):
        ax.legend(loc='upper right')
        ax.set_axisbelow(True)
 
-       plt.tight_layout()
+       #plt.tight_layout()
        plt.show()

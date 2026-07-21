@@ -1,5 +1,6 @@
 class Load:
-    def __init__(self, bus, array_kw, array_kvar):
+    def __init__(self, id, bus, array_kw, array_kvar):
+        self.id = id
         self.bus = bus
         self.array_kw = array_kw
         self.array_kvar = array_kvar

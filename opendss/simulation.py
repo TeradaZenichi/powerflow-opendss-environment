@@ -27,27 +27,14 @@ def run_simulation(data):
         """)
 
     # Load demand
-    dss.text(f"""
-    New Load.Load1 bus1=bus_005 phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0
-    """)
+    for load in data["load_list"]:
+        dss.text(f"""
+        New Load.{load.id} bus1={load.bus} phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0
+        """)
 
     # =============================================================================
     # 24-hour profiles (kW / kvar)
     # =============================================================================
-
-    load_kw = 2.5*np.array([
-        60, 55, 50, 50, 55, 65,
-        80, 90,100,105,110,115,
-        120,115,110,105,100,110,
-        120,115,100, 90, 80, 70
-    ])
-
-    load_kvar = np.array([
-        12, 11, 10, 10, 11, 13,
-        16, 18, 20, 21, 22, 23,
-        24, 23, 22, 21, 20, 22,
-        24, 23, 20, 18, 16, 14
-    ])
 
     bess_kw = np.array([
         0,  0,  0,  0,  0,  0,
@@ -63,11 +50,11 @@ def run_simulation(data):
 
     idx = 0
     while idx < data["steps"]:
-
-        dss.text(
-            f"Edit Load.Load1 kw={load_kw[idx]:.2f} "
-            f"kvar={load_kvar[idx]:.2f}"
-        )
+        
+        for load in data["load_list"]:
+            dss.text(
+                f"Edit Load.{load.id} kw={load.array_kw[idx]:.2f} kvar={load.array_kvar[idx]:.2f}"
+            )
 
         for pv in data["pv_list"]:
             dss.text(
@@ -88,6 +75,16 @@ def run_simulation(data):
 
     pv_kw = np.sum(
         [pv.profile for pv in data["pv_list"]],
+        axis=0
+    )
+    
+    load_kw = np.sum(
+        [load.array_kw for load in data["load_list"]],
+        axis=0
+    )
+
+    load_kvar = np.sum(
+        [load.array_kvar for load in data["load_list"]],
         axis=0
     )
 
