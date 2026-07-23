@@ -19,43 +19,57 @@ def save_plots(results, output_dir):
     _plot_bus_voltages(results, output_dir)
     _plot_bus_voltages_pu(results, output_dir)
     _plot_hourly_costs(results, output_dir)
+    _plot_bess_energy_level(results, output_dir)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+def _stack_bottoms(*series):
+       '''
+       Calculates the bottom positions for stacked bar plots, 
+       ensuring that positive and negative values are stacked separately.
+       '''
+       data = np.vstack(series)
+
+       pos = np.maximum(data, 0) # Takes the positive values of the data
+       neg = np.minimum(data, 0) # Takes the negative values of the data
+
+       # Calculate the cumulative sum for positive and negative values separately
+       pos_bottom = np.vstack([np.zeros(data.shape[1]), np.cumsum(pos, axis=0)[:-1]])
+       neg_bottom = np.vstack([np.zeros(data.shape[1]), np.cumsum(neg, axis=0)[:-1]])
+
+       # If the original data is positive, use the positive bottom; otherwise, use the negative bottom
+       return np.where(data >= 0, pos_bottom, neg_bottom)
+
 
 def _plot_power_flow(results, output_dir):
 
        steps = results["steps"]
        load_kw = results["load_kw"]
-       pv_kw = results["pv_kw"]
+       pv_kw = -results["pv_kw"]      
        bess_kw = results["bess_kw"]
-       grid_kw = results["grid_kw"]
+       grid_kw = -results["grid_kw"]  
 
        hours = np.linspace(0, 24, steps, endpoint=False)
 
-       fig, ax = plt.subplots(figsize=(10,5))
+       fig, ax = plt.subplots(figsize=(10, 5))
 
-       ax.axhline(0, color='k', linestyle='-.')
-       ax.grid(color='lightgrey')
+       ax.axhline(0, color="k", linestyle="-.")
+       ax.grid(color="lightgrey")
 
        ax.plot(hours, load_kw,
-              color='k',
-              marker='o',
-              label='Load')
+              color="k",
+              marker="o",
+              label="Load")
 
-       ax.bar(hours,
-              -grid_kw,
-              color='hotpink',
-              label='Grid')
+       series = [grid_kw, pv_kw, bess_kw]
+       bottoms = _stack_bottoms(*series)
 
-       ax.bar(hours,
-              bess_kw,
-              bottom=-grid_kw,
-              color='blueviolet',
-              label='BESS')
+       colors = ["hotpink", "gold", "blueviolet"]
+       labels = ["Grid", "PV Generation", "BESS"]
 
-       ax.bar(hours,
-              -pv_kw,
-              bottom=(grid_kw/2)+np.abs(grid_kw)/2,
-              color='gold',
-              label='PV Generation')
+       for y, bottom, color, label in zip(series, bottoms, colors, labels):
+              ax.bar(hours, y, bottom=bottom, color=color, label=label)
 
        ax.set_title("Active power")
        ax.set_xlabel("Time [h]")
@@ -64,12 +78,11 @@ def _plot_power_flow(results, output_dir):
        ax.set_xticks(np.arange(0, 24))
        ax.set_xlim(0, 24)
 
-       ax.legend(loc='upper right')
+       ax.legend(loc="upper right")
        ax.set_axisbelow(True)
 
-       plot_file = output_dir / "power_flow_plot.png"
        plt.tight_layout()
-       plt.savefig(plot_file)
+       plt.savefig(output_dir / "power_flow_plot.png")
 
 def _plot_bus_voltages(results, output_dir):
 
@@ -169,6 +182,41 @@ def _plot_hourly_costs(results, output_dir):
        ax.set_axisbelow(True)
 
        plot_file = output_dir / "hourly_cost_plot.png"
+       plt.tight_layout()
+       plt.savefig(plot_file)
+       plt.close(fig)
+
+def _plot_bess_energy_level(results, output_dir):
+
+       steps = results["steps"]
+       bess_energy = results["bess_energy"]
+
+       hours = np.linspace(0, 24, steps, endpoint=False)
+
+       fig, ax = plt.subplots(figsize=(10, 5))
+
+       ax.grid(color="lightgrey")
+
+       ax.plot(
+              hours,
+              bess_energy,
+              marker="o",
+              linewidth=2,
+              color="deeppink",
+              label="BESS Energy"
+       )
+
+       ax.set_title("Battery Energy Level")
+       ax.set_xlabel("Time [h]")
+       ax.set_ylabel("Energy [kWh]")
+
+       ax.set_xticks(np.arange(0, 24))
+       ax.set_xlim(0, 24)
+
+       ax.legend(loc="best")
+       ax.set_axisbelow(True)
+
+       plot_file = output_dir / "bess_energy_plot.png"
        plt.tight_layout()
        plt.savefig(plot_file)
        plt.close(fig)

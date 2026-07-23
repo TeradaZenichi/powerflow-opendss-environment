@@ -15,14 +15,15 @@ def run_simulation(data):
 
     bess_kw = np.array([ # BESS power profile for 24 hours (will change in the future for bess control)
         0,  0,  0,  0,  0,  0,
-        8, 24, 48, 64, 76, 80,
-        76, 68, 56, 40, 16,  0,
-        0,  0,  0,  0,  0,  0
+        0, 0, 0, 25, 50, 50, 
+        50, 50, 25, 0, 0, -50,
+        -200, -100,  -100,  0,  0,  0
     ])
 
     grid_kw = np.array([])
     grid_kvar = np.array([])
     costs = np.array([])
+    bess_energy = np.array([]) 
     voltages = {bus: np.zeros(data["steps"]) for bus in dss.circuit.buses_names}
     voltages_pu = {bus: np.zeros(data["steps"]) for bus in dss.circuit.buses_names}
 
@@ -65,7 +66,8 @@ def run_simulation(data):
         "grid_kvar": grid_kvar,
         "costs": costs,
         "voltages": voltages,
-        "voltages_pu": voltages_pu
+        "voltages_pu": voltages_pu,
+        "bess_energy": _calculate_bess_energy(bess_kw, data)
     }
 
 def _simulation_setup(data,dss):
@@ -119,3 +121,19 @@ def _calculate_costs(data, grid_kw, idx):
     '''
     cost = -grid_kw[idx] * data["grid"].prices[idx] * (24/data["steps"])  # Prices are in $/kWh and grid_kw is in kW
     return cost
+
+def _calculate_bess_energy(bess_kw, data):
+    '''
+    Calculates the energy level of the BESS at each time step based on the BESS power profile.
+    '''
+    # Obs.: doesn't consider BESS efficiency and limits for now, but it can be added in the future
+    # Obs.: used only at the end of the simulation; could be modified to be used at each time step
+    # Obs.: considers the sum of all BESS
+    initial_energy = 0
+    energy = np.zeros(data["steps"])
+    for bess in data["bess_list"]:
+        initial_energy += bess.e_cap_kwh * bess.soc_init_frac
+    energy[0] = initial_energy + (bess_kw[0] * (24/data["steps"]))  # Convert kW to kWh
+    for idx in range(1, data["steps"]):
+        energy[idx] = energy[idx-1] + (bess_kw[idx] * (24/data["steps"]))  # Convert kW to kWh
+    return energy
