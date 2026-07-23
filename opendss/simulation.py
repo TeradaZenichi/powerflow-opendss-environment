@@ -13,22 +13,26 @@ def run_simulation(data):
 
     _simulation_setup(data, dss)
 
-    bess_kw = np.array([ # BESS power profile for 24 hours (will change in the future for bess control)
+    # BESS power profile for 24 hours (will change in the future for bess control)
+    bess_kw = np.array([ 
         0,  0,  0,  0,  0,  0,
         0, 0, 0, 25, 50, 50, 
         50, 50, 25, 0, 0, -50,
         -200, -100,  -100,  0,  0,  0
     ])
+    bess_kvar = 0.05*bess_kw
+
+    # PV reactive power profile (will change in the future)
+    pv_kvar = np.zeros(data["steps"])
 
     grid_kw = np.array([])
     grid_kvar = np.array([])
     costs = np.array([])
-    bess_energy = np.array([]) 
     voltages = {bus: np.zeros(data["steps"]) for bus in dss.circuit.buses_names}
     voltages_pu = {bus: np.zeros(data["steps"]) for bus in dss.circuit.buses_names}
 
     for idx in range(data["steps"]):
-        _update_snapshot_powers(data, dss, bess_kw, idx)
+        _update_snapshot_powers(data, dss, bess_kw, bess_kvar, pv_kvar, idx)
         dss.solution.solve()
         for bus in voltages:
             dss.circuit.set_active_bus(bus)
@@ -42,18 +46,15 @@ def run_simulation(data):
     data["grid"].array_kvar = grid_kvar
 
     pv_kw = np.sum(
-        [pv.profile for pv in data["pv_list"]],
-        axis=0
+        [pv.profile for pv in data["pv_list"]], axis=0
     )
     
     load_kw = np.sum(
-        [load.array_kw for load in data["load_list"]],
-        axis=0
+        [load.array_kw for load in data["load_list"]], axis=0
     )
 
     load_kvar = np.sum(
-        [load.array_kvar for load in data["load_list"]],
-        axis=0
+        [load.array_kvar for load in data["load_list"]], axis=0
     )
 
     return {
@@ -62,7 +63,9 @@ def run_simulation(data):
         "load_kw": load_kw,
         "load_kvar": load_kvar,
         "bess_kw": bess_kw,
+        "bess_kvar": bess_kvar,
         "pv_kw": pv_kw,
+        "pv_kvar": pv_kvar,
         "grid_kw": grid_kw,
         "grid_kvar": grid_kvar,
         "costs": costs,
@@ -96,24 +99,23 @@ def _simulation_setup(data,dss):
         New Load.{load.id} bus1={load.bus} phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0
         """)
 
-def _update_snapshot_powers(data,dss,bess_kw,idx):
+def _update_snapshot_powers(data,dss,bess_kw,bess_kvar,pv_kvar,idx):
     '''
     Update the power values of the loads, PV generators and BESS for a given time step.
     '''
     for load in data["load_list"]:
         dss.text(
-            f"Edit Load.{load.id} kw={load.array_kw[idx]:.2f} kvar={load.array_kvar[idx]:.2f}"
+            f"Edit Load.{load.id} kw={load.array_kw[idx]} kvar={load.array_kvar[idx]}"
         )
 
     for pv in data["pv_list"]:
         dss.text(
-            f"Edit Generator.{pv.id} kw={pv.profile[idx]:.2f} kvar=0"
+            f"Edit Generator.{pv.id} kw={pv.profile[idx]} kvar={pv_kvar[idx]}"
         )
 
     for bess in data["bess_list"]:
         dss.text(
-            f"Edit Load.{bess.id} kw={bess_kw[idx]:.2f} "
-            f"kvar=0"
+            f"Edit Load.{bess.id} kw={bess_kw[idx]} kvar={bess_kvar[idx]}"
         )
 
 def _calculate_costs(data, grid_kw, idx):
