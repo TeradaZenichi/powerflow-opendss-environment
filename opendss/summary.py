@@ -6,13 +6,13 @@ import json
 import numpy as np
 from pathlib import Path
 
-
 def save_summary(results, output_dir):
 
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     steps = results["steps"]
+    dt = results["dt"]
     load_kw = np.array(results["load_kw"])
     pv_kw = np.array(results["pv_kw"])
     bess_kw = np.array(results["bess_kw"])
@@ -20,9 +20,6 @@ def save_summary(results, output_dir):
     costs = np.array(results["costs"])
 
     voltages_pu = results.get("voltages_pu", {})
-
-    # Time step duration [hours]
-    dt = 24 / steps
 
     # Energy calculations [kWh]
     load_energy = np.sum(load_kw) * dt

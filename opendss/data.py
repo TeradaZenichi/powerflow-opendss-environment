@@ -19,6 +19,7 @@ def load_data(path):
     # prices.csv
     prices = pd.read_csv(path / "price.csv")["price_per_kwh"].to_numpy()
     grid = Grid(prices)
+    steps = len(prices)
 
     # config.json
     with open(path / "config.json", "r", encoding="utf-8") as f:
@@ -39,7 +40,6 @@ def load_data(path):
         profile_file, profile_col = pv_data["profile"].split(":")
         pv_data["profile"] = pd.read_csv(path / profile_file)[profile_col].to_numpy()
         pv_list.append(PV(**pv_data))
-        steps = len(pv_data["profile"])
         
     # demand.csv
     demand = pd.read_csv(path / "demand.csv")
@@ -57,4 +57,11 @@ def load_data(path):
                     array_kvar=demand[q_col].to_numpy()
                 )
             )
-    return {"steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology}
+    steps = len(demand)
+    dt = _get_dt_hours(demand)
+
+    return {"dt": dt, "steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology}
+
+def _get_dt_hours(df):
+    timestamps = pd.to_datetime(df["timestamp"])
+    return (timestamps.iloc[1] - timestamps.iloc[0]).total_seconds() / 3600

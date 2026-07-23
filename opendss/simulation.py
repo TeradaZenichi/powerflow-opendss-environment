@@ -57,6 +57,7 @@ def run_simulation(data):
     )
 
     return {
+        "dt": data["dt"],
         "steps": data["steps"],
         "load_kw": load_kw,
         "load_kvar": load_kvar,
@@ -119,7 +120,7 @@ def _calculate_costs(data, grid_kw, idx):
     '''
     Calculates the costs of the energy consumed from the grid at each time step.
     '''
-    cost = -grid_kw[idx] * data["grid"].prices[idx] * (24/data["steps"])  # Prices are in $/kWh and grid_kw is in kW
+    cost = -grid_kw[idx] * data["grid"].prices[idx] * data["dt"]  # Prices are in $/kWh and grid_kw is in kW
     return cost
 
 def _calculate_bess_energy(bess_kw, data):
@@ -133,7 +134,7 @@ def _calculate_bess_energy(bess_kw, data):
     energy = np.zeros(data["steps"])
     for bess in data["bess_list"]:
         initial_energy += bess.e_cap_kwh * bess.soc_init_frac
-    energy[0] = initial_energy + (bess_kw[0] * (24/data["steps"]))  # Convert kW to kWh
+    energy[0] = initial_energy + (bess_kw[0] * data["dt"])  # Convert kW to kWh
     for idx in range(1, data["steps"]):
-        energy[idx] = energy[idx-1] + (bess_kw[idx] * (24/data["steps"]))  # Convert kW to kWh
+        energy[idx] = energy[idx-1] + (bess_kw[idx] * data["dt"])  # Convert kW to kWh
     return energy

@@ -49,8 +49,9 @@ def _plot_power_flow(results, output_dir):
        pv_kw = -results["pv_kw"]      
        bess_kw = results["bess_kw"]
        grid_kw = -results["grid_kw"]  
+       dt = results["dt"]
 
-       hours = np.linspace(0, 24, steps, endpoint=False)
+       hours = np.arange(steps) * dt
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -69,15 +70,14 @@ def _plot_power_flow(results, output_dir):
        labels = ["Grid", "PV Generation", "BESS"]
 
        for y, bottom, color, label in zip(series, bottoms, colors, labels):
-              ax.bar(hours, y, bottom=bottom, color=color, label=label)
+              ax.bar(hours, y, width=0.9*dt, bottom=bottom, color=color, label=label)
 
        ax.set_title("Active power")
        ax.set_xlabel("Time [h]")
        ax.set_ylabel("Power [kW]")
 
-       ax.set_xticks(np.arange(0, 24))
-       ax.set_xlim(0, 24)
-
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)       
        ax.legend(loc="upper right")
        ax.set_axisbelow(True)
 
@@ -88,8 +88,9 @@ def _plot_bus_voltages(results, output_dir):
 
        steps = results["steps"]
        voltages = results["voltages"]
+       dt = results["dt"]
 
-       hours = np.linspace(0, 24, steps, endpoint=False)
+       hours = np.arange(steps) * dt
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -108,8 +109,8 @@ def _plot_bus_voltages(results, output_dir):
        ax.set_xlabel("Time [h]")
        ax.set_ylabel("Voltage [V]")
 
-       ax.set_xticks(np.arange(0, 24))
-       ax.set_xlim(0, 24)
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
 
        ax.legend(loc="best")
        ax.set_axisbelow(True)
@@ -123,8 +124,9 @@ def _plot_bus_voltages_pu(results, output_dir):
 
        steps = results["steps"]
        voltages = results["voltages_pu"]
+       dt = results["dt"]
 
-       hours = np.linspace(0, 24, steps, endpoint=False)
+       hours = np.arange(steps) * dt
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -143,8 +145,8 @@ def _plot_bus_voltages_pu(results, output_dir):
        ax.set_xlabel("Time [h]")
        ax.set_ylabel("Voltage [pu]")
 
-       ax.set_xticks(np.arange(0, 24))
-       ax.set_xlim(0, 24)
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
 
        ax.legend(loc="best")
        ax.set_axisbelow(True)
@@ -158,8 +160,9 @@ def _plot_hourly_costs(results, output_dir):
 
        steps = results["steps"]
        costs = results["costs"]
+       dt = results["dt"]
 
-       hours = np.linspace(0, 24, steps, endpoint=False)
+       hours = np.arange(steps) * dt
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -176,8 +179,8 @@ def _plot_hourly_costs(results, output_dir):
        ax.set_xlabel("Time [h]")
        ax.set_ylabel("Cost [$]")
 
-       ax.set_xticks(np.arange(0, 24, 1))
-       ax.set_xlim(0, 24)
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)   
 
        ax.set_axisbelow(True)
 
@@ -190,8 +193,9 @@ def _plot_bess_energy_level(results, output_dir):
 
        steps = results["steps"]
        bess_energy = results["bess_energy"]
+       dt = results["dt"]
 
-       hours = np.linspace(0, 24, steps, endpoint=False)
+       hours = np.arange(steps) * dt
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -210,8 +214,8 @@ def _plot_bess_energy_level(results, output_dir):
        ax.set_xlabel("Time [h]")
        ax.set_ylabel("Energy [kWh]")
 
-       ax.set_xticks(np.arange(0, 24))
-       ax.set_xlim(0, 24)
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
 
        ax.legend(loc="best")
        ax.set_axisbelow(True)
