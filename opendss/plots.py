@@ -46,7 +46,7 @@ def _plot_power_flow(results, output_dir):
 
        steps = results["steps"]
        load_kw = results["load_kw"]
-       pv_kw = -results["pv_kw"]      
+       pv_kw = results["pv_kw"]      
        bess_kw = results["bess_kw"]
        grid_kw = -results["grid_kw"]  
        dt = results["dt"]
@@ -63,11 +63,11 @@ def _plot_power_flow(results, output_dir):
               marker="o",
               label="Load")
 
-       series = [grid_kw, pv_kw, bess_kw]
+       series = [pv_kw, grid_kw, bess_kw]
        bottoms = _stack_bottoms(*series)
 
-       colors = ["hotpink", "gold", "blueviolet"]
-       labels = ["Grid", "PV Generation", "BESS"]
+       colors = ["gold", "hotpink", "blueviolet"]
+       labels = ["PV Generation", "Grid", "BESS"]
 
        for y, bottom, color, label in zip(series, bottoms, colors, labels):
               ax.bar(hours, y, width=0.9*dt, bottom=bottom, color=color, label=label)
