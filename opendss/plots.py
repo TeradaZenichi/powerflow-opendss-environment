@@ -1,5 +1,5 @@
 '''
-Plots results from the simulation and saves them to the specified output directory.
+Plots sim_results from the simulation and saves them to the specified output directory.
 The plots include:
 - Active power flow (load, PV generation, BESS, and grid)
 - Bus voltage magnitudes
@@ -11,18 +11,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 
-def save_plots(results, output_dir):
+def save_plots(sim_results, output_dir):
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    _plot_power_flow(results, output_dir)
-    _plot_bus_voltages(results, output_dir)
-    _plot_bus_voltages_pu(results, output_dir)
-    _plot_hourly_costs(results, output_dir)
-    _plot_bess_energy_level(results, output_dir)
-
-import numpy as np
-import matplotlib.pyplot as plt
+    _plot_power_flow(sim_results, output_dir)
+    _plot_bus_voltages(sim_results, output_dir)
+    _plot_bus_voltages_pu(sim_results, output_dir)
+    _plot_hourly_costs(sim_results, output_dir)
+    _plot_bess_energy_level(sim_results, output_dir)
+    _plot_bess_soc(sim_results, output_dir)
+    _plot_price_grid_import(sim_results, output_dir)
 
 def _stack_bottoms(*series):
        '''
@@ -42,14 +41,19 @@ def _stack_bottoms(*series):
        return np.where(data >= 0, pos_bottom, neg_bottom)
 
 
-def _plot_power_flow(results, output_dir):
+def _plot_power_flow(sim_results, output_dir):
 
-       steps = results["steps"]
-       load_kw = results["load_kw"]
-       pv_kw = results["pv_kw"]      
-       bess_kw = results["bess_kw"]
-       grid_kw = -results["grid_kw"]  
-       dt = results["dt"]
+       steps = sim_results["steps"]
+       dt = sim_results["dt"]
+       grid = sim_results["grid"]
+       bess_list = sim_results["bess_list"]
+       pv_list = sim_results["pv_list"]
+       load_list = sim_results["load_list"]
+
+       pv_kw = np.sum([pv.array_kw for pv in pv_list], axis=0)
+       load_kw = np.sum([load.array_kw for load in load_list], axis=0)
+       bess_kw = np.sum([bess.array_kw for bess in bess_list], axis = 0)
+       grid_kw = -np.array(grid.array_kw)
 
        hours = np.arange(steps) * dt
 
@@ -84,11 +88,11 @@ def _plot_power_flow(results, output_dir):
        plt.tight_layout()
        plt.savefig(output_dir / "power_flow_plot.png")
 
-def _plot_bus_voltages(results, output_dir):
+def _plot_bus_voltages(sim_results, output_dir):
 
-       steps = results["steps"]
-       voltages = results["voltages"]
-       dt = results["dt"]
+       steps = sim_results["steps"]
+       voltages = sim_results["results"].voltages
+       dt = sim_results["dt"]
 
        hours = np.arange(steps) * dt
 
@@ -120,11 +124,11 @@ def _plot_bus_voltages(results, output_dir):
        plt.savefig(plot_file)
        plt.close(fig)
 
-def _plot_bus_voltages_pu(results, output_dir):
+def _plot_bus_voltages_pu(sim_results, output_dir):
 
-       steps = results["steps"]
-       voltages = results["voltages_pu"]
-       dt = results["dt"]
+       steps = sim_results["steps"]
+       voltages = sim_results["results"].voltages_pu
+       dt = sim_results["dt"]
 
        hours = np.arange(steps) * dt
 
@@ -156,11 +160,11 @@ def _plot_bus_voltages_pu(results, output_dir):
        plt.savefig(plot_file)
        plt.close(fig)
 
-def _plot_hourly_costs(results, output_dir):
+def _plot_hourly_costs(sim_results, output_dir):
 
-       steps = results["steps"]
-       costs = results["costs"]
-       dt = results["dt"]
+       steps = sim_results["steps"]
+       costs = sim_results["results"].costs
+       dt = sim_results["dt"]
 
        hours = np.arange(steps) * dt
 
@@ -189,11 +193,11 @@ def _plot_hourly_costs(results, output_dir):
        plt.savefig(plot_file)
        plt.close(fig)
 
-def _plot_bess_energy_level(results, output_dir):
+def _plot_bess_energy_level(sim_results, output_dir):
 
-       steps = results["steps"]
-       bess_energy = results["bess_energy"]
-       dt = results["dt"]
+       steps = sim_results["steps"]
+       bess_list = sim_results["bess_list"]
+       dt = sim_results["dt"]
 
        hours = np.arange(steps) * dt
 
@@ -201,14 +205,16 @@ def _plot_bess_energy_level(results, output_dir):
 
        ax.grid(color="lightgrey")
 
-       ax.plot(
-              hours,
-              bess_energy,
-              marker="o",
-              linewidth=2,
-              color="deeppink",
-              label="BESS Energy"
-       )
+       for bess in bess_list:
+              energy = np.array(bess.array_soc) * bess.e_cap_kwh
+
+              ax.plot(
+                     hours,
+                     energy,
+                     marker="o",
+                     linewidth=2,
+                     label=f"BESS {bess.id}"
+        )
 
        ax.set_title("Battery Energy Level")
        ax.set_xlabel("Time [h]")
@@ -221,6 +227,81 @@ def _plot_bess_energy_level(results, output_dir):
        ax.set_axisbelow(True)
 
        plot_file = output_dir / "bess_energy_plot.png"
+       plt.tight_layout()
+       plt.savefig(plot_file)
+       plt.close(fig)
+
+def _plot_bess_soc(sim_results, output_dir):
+
+       steps = sim_results["steps"]
+       bess_list = sim_results["bess_list"]
+       dt = sim_results["dt"]
+
+       hours = np.arange(steps) * dt
+
+       fig, ax = plt.subplots(figsize=(10, 5))
+
+       ax.grid(color="lightgrey")
+
+       for bess in bess_list:
+              soc = np.array(bess.array_soc) * 100
+
+              ax.plot(
+                     hours,
+                     soc,
+                     marker="o",
+                     linewidth=2,
+                     label=f"BESS {bess.id}"
+        )
+
+       ax.set_title("Battery SoC Level")
+       ax.set_xlabel("Time [h]")
+       ax.set_ylabel("SoC [%]")
+
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
+
+       ax.legend(loc="best")
+       ax.set_axisbelow(True)
+
+       plot_file = output_dir / "bess_soc_plot.png"
+       plt.tight_layout()
+       plt.savefig(plot_file)
+       plt.close(fig)
+
+def _plot_price_grid_import(sim_results, output_dir):
+
+       prices = sim_results["grid"].prices
+       grid_kw = -np.array(sim_results["grid"].array_kw)
+       steps = sim_results["steps"]
+       dt = sim_results["dt"]
+
+       hours = np.arange(steps) * dt
+       grid_kwh = grid_kw * dt
+
+       fig, ax1 = plt.subplots(figsize=(10, 5))
+       ax2 = ax1.twinx()
+
+       ax1.grid(color="lightgrey")
+
+       ax1.step(hours, prices, where="post", color="dodgerblue", linewidth=2, label="Electricity Price")
+       ax2.step(hours, grid_kwh, where="post", color="hotpink", linewidth=2, label="Grid Import")
+
+       ax1.set_title("Electricity Price and Grid Import")
+       ax1.set_xlabel("Time [h]")
+       ax1.set_ylabel("Price [$]")
+       ax2.set_ylabel("Imported Energy [kWh]")
+
+       ax1.set_xticks(hours[::int(1/dt)])
+       ax1.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)
+
+       lines1, labels1 = ax1.get_legend_handles_labels()
+       lines2, labels2 = ax2.get_legend_handles_labels()
+       ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
+
+       ax1.set_axisbelow(True)
+
+       plot_file = output_dir / "price_grid_import_plot.png"
        plt.tight_layout()
        plt.savefig(plot_file)
        plt.close(fig)

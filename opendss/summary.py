@@ -6,20 +6,25 @@ import json
 import numpy as np
 from pathlib import Path
 
-def save_summary(results, output_dir):
+def save_summary(sim_results, output_dir):
 
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    steps = results["steps"]
-    dt = results["dt"]
-    load_kw = np.array(results["load_kw"])
-    pv_kw = np.array(results["pv_kw"])
-    bess_kw = np.array(results["bess_kw"])
-    grid_kw = np.array(results["grid_kw"])
-    costs = np.array(results["costs"])
+    steps = sim_results["steps"]
+    dt = sim_results["dt"]
+    grid = sim_results["grid"]
+    bess_list = sim_results["bess_list"]
+    pv_list = sim_results["pv_list"]
+    load_list = sim_results["load_list"]
+    costs = np.array(sim_results["results"].costs)
 
-    voltages_pu = results.get("voltages_pu", {})
+    voltages_pu = sim_results["results"].voltages_pu
+
+    pv_kw = np.sum([pv.array_kw for pv in pv_list], axis=0)
+    load_kw = np.sum([load.array_kw for load in load_list], axis=0)
+    bess_kw = np.sum([bess.array_kw for bess in bess_list], axis = 0)
+    grid_kw = -np.array(grid.array_kw)
 
     # Energy calculations [kWh]
     load_energy = np.sum(load_kw) * dt
@@ -30,8 +35,14 @@ def save_summary(results, output_dir):
     grid_export_energy = np.sum(grid_kw[grid_kw > 0]) * dt
 
     # Battery energy
-    bess_charge_energy = np.sum(np.abs(bess_kw[bess_kw > 0])) * dt
-    bess_discharge_energy = np.sum(np.abs(bess_kw[bess_kw < 0])) * dt
+    bess_charge_energy = 0
+    bess_discharge_energy = 0
+
+    for bess in bess_list:
+        bess_kw = np.array(bess.array_kw)
+
+        bess_charge_energy += np.sum(bess_kw[bess_kw > 0]) * dt
+        bess_discharge_energy += np.sum(np.abs(bess_kw[bess_kw < 0])) * dt
 
     # Cost
     total_cost = np.sum(costs)

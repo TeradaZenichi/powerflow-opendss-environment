@@ -15,7 +15,6 @@ def simulation_results(case):
     case_path = project_dir / "examples" / case
 
     results = run_simulation(load_data(case_path))
-
     output_dir = project_dir / "outputs" / case_path.name
 
     plots_dir = output_dir / "plots"

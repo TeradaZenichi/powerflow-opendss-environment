@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import re
 
-from .elements import BESS, PV, Load, Grid
+from .elements import BESS, PV, Load, Grid, Results
 
 def load_data(path):
     path = Path(path).expanduser().resolve()
@@ -60,7 +60,9 @@ def load_data(path):
     steps = len(demand)
     dt = _get_dt_hours(demand)
 
-    return {"dt": dt, "steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology}
+    results = Results()
+
+    return {"dt": dt, "steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology, "results": results}
 
 def _get_dt_hours(df):
     timestamps = pd.to_datetime(df["timestamp"])
