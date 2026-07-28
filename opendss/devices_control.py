@@ -1,5 +1,9 @@
 import numpy as np
 
+'''
+The following functions can be changed by the user to determine BESS and PV operation
+'''
+
 def bess_control(bess, idx, dt):
     # BESS power profile for 24 hours (will change in the future for bess control)
     # To respect energy and power limits, use with bess.operate

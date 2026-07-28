@@ -5,6 +5,8 @@ The plots include:
 - Bus voltage magnitudes
 - Bus voltage magnitudes in per unit (pu)
 - Hourly energy costs
+- BESS energy and SoC plots
+- Prices vs Grid Import plot
 '''
 
 import matplotlib.pyplot as plt
