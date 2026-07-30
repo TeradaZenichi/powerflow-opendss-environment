@@ -26,7 +26,7 @@ def run_simulation(data):
             data["results"].voltages_pu[bus][idx] = dss.bus.vmag_angle[0]/(data["base_kv"] * 1000)
         data["grid"].array_kw.append(dss.circuit.total_power[0])
         data["grid"].array_kvar.append(dss.circuit.total_power[1])
-        data["results"].costs.append(_calculate_costs(data, data["grid"].array_kw, idx))
+        data["results"].costs.append(-data["grid"].array_kw[idx] * data["grid"].prices[idx] * data["dt"])
 
     return {
         "dt": data["dt"],
@@ -83,10 +83,3 @@ def _update_snapshot_powers(data, dss, idx):
         dss.text(
             f"Edit Load.{bess.id} kw={p_bess} kvar={q_bess}"
         )
-
-def _calculate_costs(data, grid_kw, idx):
-    '''
-    Calculates the costs of the energy consumed from the grid at each time step.
-    '''
-    cost = -grid_kw[idx] * data["grid"].prices[idx] * data["dt"]  # Prices are in $/kWh and grid_kw is in kW
-    return cost
