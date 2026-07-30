@@ -1,7 +1,7 @@
 '''
 Runs a power flow simulation for a given data set and returns the results as a dictionary.
 The simulation uses the OpenDSS engine to solve the power flow for each time step, updating the power values of loads, PV generators, and BESS based on the provided data.
-The results include: active power flow, bus voltage magnitudes, and hourly energy costs.
+The results include: updated elements with active and reactive power arrays, bus voltage magnitudes and hourly energy costs.
 '''
 
 import py_dss_interface
