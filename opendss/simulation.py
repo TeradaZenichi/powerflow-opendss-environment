@@ -19,6 +19,7 @@ def run_simulation(data):
 
     for idx in range(data["steps"]):
         _update_snapshot_powers(data, dss, idx)
+        dss.text("Set Tolerance=1e-8")
         dss.solution.solve()
         for bus in data["results"].voltages:
             dss.circuit.set_active_bus(bus)
@@ -45,6 +46,8 @@ def _simulation_setup(data,dss):
     '''
     # Topology
     dss.text(f'compile "{data["topology"]}"')
+
+    dss.text("Vsource.source.model=Ideal")
 
     # PV generators
     for pv in data["pv_list"]:
