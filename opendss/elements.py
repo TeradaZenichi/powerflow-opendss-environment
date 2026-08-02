@@ -6,20 +6,22 @@ class Load:
         self.array_kvar = array_kvar
 
 class PV:
-    def __init__(self, id, bus, p_max_kw, s_max_kva,
+    def __init__(self, id, bus, p_max_kw, s_max_kva, q_loss_rated_kw, night_var,
                  profile, control, curtailable, power_factor):
         self.id, self.bus = id, bus
         self.p_max_kw, self.s_max_kva = p_max_kw, s_max_kva
+        self.q_loss_rated_kw, self.night_var = q_loss_rated_kw, night_var
         self.profile, self.control = profile, control
         self.curtailable, self.power_factor = curtailable, power_factor
         self.array_kw = None
         self.array_kvar = []
 
 class BESS:
-    def __init__(self, id, bus, e_cap_kwh, p_charge_max_kw, p_discharge_max_kw,
+    def __init__(self, id, bus, e_cap_kwh, p_charge_max_kw, p_discharge_max_kw, s_max_kva, reactive_control, q_loss_rated_kw,
                  eta_charge, eta_discharge, soc_init_frac, soc_min_frac, soc_max_frac, cyclic_soc):
         self.id, self.bus, self.e_cap_kwh = id, bus, e_cap_kwh
         self.p_charge_max_kw, self.p_discharge_max_kw = p_charge_max_kw, p_discharge_max_kw
+        self.s_max_kva, self.reactive_control, self.q_loss_rated_kw = s_max_kva, reactive_control, q_loss_rated_kw
         self.eta_charge, self.eta_discharge = eta_charge, eta_discharge
         self.soc_init_frac, self.soc_min_frac, self.soc_max_frac = soc_init_frac, soc_min_frac, soc_max_frac
         self.cyclic_soc = cyclic_soc

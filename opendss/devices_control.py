@@ -8,15 +8,12 @@ def bess_control(bess, idx, dt):
     # BESS power profile for 24 hours (will change in the future for bess control)
     # To respect energy and power limits, use with bess.operate
     bess_kw = np.array([ 
-            0,  0,  0,  0,  0,  0,
-            0, 0, 0, 25, 50, 50, 
-            50, 50, 25, 0, 0, -50,
-            -200, -100,  -100,  0,  0,  0
-        ])
-    bess_kvar = -abs(0.05*bess_kw)
+            -24.699999999999996,0.0, 40.0 ,40.0, 0.0, 0.0, 0.0, -5.5000000000000115, -40.0, -40.0, 0.0, -0.0 ,40.0, 40.0, 14.736842105263172, 0.0, -0.0, -5.5000000000000115, -40.0, -40.0, -0.0, 0.0, 2.105263157894739, 40.0])
+    
+    bess.array_kvar = -abs(0.0*bess_kw)
 
     p_bess = bess.operate(bess_kw[idx], dt)
-    q_bess = bess_kvar[idx]
+    q_bess = bess.array_kvar[idx]
 
     return p_bess, q_bess
 

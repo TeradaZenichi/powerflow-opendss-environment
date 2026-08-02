@@ -59,10 +59,11 @@ def load_data(path):
             )
     steps = len(demand)
     dt = _get_dt_hours(demand)
+    timestamps = pd.to_datetime(demand["timestamp"])
 
     results = Results()
 
-    return {"dt": dt, "steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology, "results": results}
+    return {"dt": dt, "timestamps": timestamps, "steps": steps, "phases": phases, "base_kv": base_kv, "grid": grid, "bess_list": bess_list, "pv_list": pv_list, "load_list": load_list, "topology": topology, "results": results}
 
 def _get_dt_hours(df):
     timestamps = pd.to_datetime(df["timestamp"])
