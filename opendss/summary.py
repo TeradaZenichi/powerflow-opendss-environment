@@ -1,5 +1,5 @@
 '''
-Summarizes the simulation results and saves them to a JSON file.
+Summarizes the simulation results and saves them to a JSON file and CSV files.
 '''
 
 import json
