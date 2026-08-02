@@ -26,7 +26,8 @@ def run_simulation(data):
             data["results"].voltages[bus][idx] = dss.bus.vmag_angle[0]
             data["results"].voltages_pu[bus][idx] = dss.bus.vmag_angle[0]/(data["base_kv"] * 1000)
         data["grid"].array_kw.append(dss.circuit.total_power[0])
-        data["grid"].array_kvar.append(dss.circuit.total_power[1])
+        # Public convention: positive Q means power imported from the grid.
+        data["grid"].array_kvar.append(-dss.circuit.total_power[1])
         data["results"].costs.append(-data["grid"].array_kw[idx] * data["grid"].prices[idx] * data["dt"])
 
     return {
@@ -77,13 +78,13 @@ def _update_snapshot_powers(data, dss, idx):
         )
 
     for pv in data["pv_list"]:
-        p_pv, q_pv = pv_control(pv,idx)
+        p_pv, q_pv_injection = pv_control(pv,idx)
         dss.text(
-            f"Edit Generator.{pv.id} kw={p_pv} kvar={q_pv}"
+            f"Edit Generator.{pv.id} kw={p_pv} kvar={q_pv_injection}"
         )
 
     for bess in data["bess_list"]:
-        p_bess, q_bess = bess_control(bess,idx,data["dt"])
+        p_bess, q_bess_injection = bess_control(bess,idx,data["dt"])
         dss.text(
-            f"Edit Load.{bess.id} kw={p_bess} kvar={q_bess}"
+            f"Edit Load.{bess.id} kw={p_bess} kvar={-q_bess_injection}"
         )

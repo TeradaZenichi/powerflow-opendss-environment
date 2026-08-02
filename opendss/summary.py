@@ -32,16 +32,22 @@ def save_summary(sim_results, output_dir):
     load_energy = np.sum(load_kw) * dt
     pv_energy = np.sum(pv_kw) * dt
 
-    grid_import_energy = np.sum(np.abs(grid_kw[grid_kw < 0])) * dt
-    grid_export_energy = np.sum(grid_kw[grid_kw > 0]) * dt
+    grid_import_energy = np.sum(grid_kw[grid_kw > 0]) * dt
+    grid_export_energy = np.sum(-grid_kw[grid_kw < 0]) * dt
 
     bess_charge_energy = 0
     bess_discharge_energy = 0
+    bess_reactive_loss_energy = 0
 
     for bess in bess_list:
         p = np.asarray(bess.array_kw)
         bess_charge_energy += np.sum(p[p > 0]) * dt
         bess_discharge_energy += np.sum(-p[p < 0]) * dt
+        bess_reactive_loss_energy += np.sum(bess.array_inverter_loss_kw) * dt
+
+    pv_reactive_loss_energy = np.sum([
+        np.sum(pv.array_inverter_loss_kw) for pv in pv_list
+    ]) * dt
 
     total_cost = np.sum(costs)
 
@@ -58,7 +64,9 @@ def save_summary(sim_results, output_dir):
             "grid_import_kwh": grid_import_energy,
             "grid_export_kwh": grid_export_energy,
             "bess_charge_kwh": bess_charge_energy,
-            "bess_discharge_kwh": bess_discharge_energy
+            "bess_discharge_kwh": bess_discharge_energy,
+            "bess_reactive_loss_kwh": bess_reactive_loss_energy,
+            "pv_reactive_loss_kwh": pv_reactive_loss_energy
         },
         "cost": {
             "total_energy_cost": total_cost
@@ -94,10 +102,21 @@ def save_summary(sim_results, output_dir):
         devices_data[f"bess_{bess.id}_p_discharge_kw"] = np.maximum(-p, 0)
         devices_data[f"bess_{bess.id}_soc_kwh"] = soc_kwh
         devices_data[f"bess_{bess.id}_soc_frac"] = soc_frac
+        devices_data[f"bess_{bess.id}_inverter_loss_kw"] = np.asarray(
+            bess.array_inverter_loss_kw
+        )
 
     for pv in pv_list:
         devices_data[f"pv_{pv.id}_available_kw"] = np.asarray(pv.profile)
         devices_data[f"pv_{pv.id}_generation_kw"] = np.asarray(pv.array_kw)
+        devices_data[f"pv_{pv.id}_p_injection_kw"] = np.asarray(pv.array_p_net_kw)
+        devices_data[f"pv_{pv.id}_q_injection_kvar"] = np.asarray(pv.array_kvar)
+        devices_data[f"pv_{pv.id}_grid_consumption_kw"] = np.asarray(
+            pv.array_grid_consumption_kw
+        )
+        devices_data[f"pv_{pv.id}_inverter_loss_kw"] = np.asarray(
+            pv.array_inverter_loss_kw
+        )
 
 
     pd.DataFrame(devices_data).to_csv(
