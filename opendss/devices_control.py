@@ -25,49 +25,6 @@ PV_KVAR = np.array([
     49.927218, 0.0, 0.0, 0.0, 0.0, 0.0,
 ])
 
-def split_control_profiles(episodes, episode_steps):
-    total_steps = episodes * episode_steps
-
-    if total_steps > len(BESS_KW):
-        raise ValueError(
-            f"Requested {total_steps} steps, but BESS_KW "
-            f"only has {len(BESS_KW)} values."
-        )
-
-    if total_steps > len(BESS_KVAR):
-        raise ValueError(
-            f"Requested {total_steps} steps, but BESS_KVAR "
-            f"only has {len(BESS_KVAR)} values."
-        )
-
-    if total_steps > len(PV_KVAR):
-        raise ValueError(
-            f"Requested {total_steps} steps, but PV_KVAR "
-            f"only has {len(PV_KVAR)} values."
-        )
-
-    bess_kw_episodes = [
-        BESS_KW[i:i + episode_steps]
-        for i in range(0, total_steps, episode_steps)
-    ]
-
-    bess_kvar_episodes = [
-        BESS_KVAR[i:i + episode_steps]
-        for i in range(0, total_steps, episode_steps)
-    ]
-
-    pv_kvar_episodes = [
-        PV_KVAR[i:i + episode_steps]
-        for i in range(0, total_steps, episode_steps)
-    ]
-
-    return (
-        bess_kw_episodes,
-        bess_kvar_episodes,
-        pv_kvar_episodes,
-    )
-
-
 def bess_control(bess, idx, dt, bess_kw, bess_kvar):
     return bess.operate(
         bess_kw[idx],
