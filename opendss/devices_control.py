@@ -25,13 +25,59 @@ PV_KVAR = np.array([
     49.927218, 0.0, 0.0, 0.0, 0.0, 0.0,
 ])
 
+def split_control_profiles(episodes, episode_steps):
+    total_steps = episodes * episode_steps
 
-def bess_control(bess, idx, dt):
-    # BESS power profiles for 24 hours (will change in the future for bess control)
-    # To respect energy and power limits, use with bess.operate
-    return bess.operate(BESS_KW[idx], BESS_KVAR[idx], dt)
+    if total_steps > len(BESS_KW):
+        raise ValueError(
+            f"Requested {total_steps} steps, but BESS_KW "
+            f"only has {len(BESS_KW)} values."
+        )
+
+    if total_steps > len(BESS_KVAR):
+        raise ValueError(
+            f"Requested {total_steps} steps, but BESS_KVAR "
+            f"only has {len(BESS_KVAR)} values."
+        )
+
+    if total_steps > len(PV_KVAR):
+        raise ValueError(
+            f"Requested {total_steps} steps, but PV_KVAR "
+            f"only has {len(PV_KVAR)} values."
+        )
+
+    bess_kw_episodes = [
+        BESS_KW[i:i + episode_steps]
+        for i in range(0, total_steps, episode_steps)
+    ]
+
+    bess_kvar_episodes = [
+        BESS_KVAR[i:i + episode_steps]
+        for i in range(0, total_steps, episode_steps)
+    ]
+
+    pv_kvar_episodes = [
+        PV_KVAR[i:i + episode_steps]
+        for i in range(0, total_steps, episode_steps)
+    ]
+
+    return (
+        bess_kw_episodes,
+        bess_kvar_episodes,
+        pv_kvar_episodes,
+    )
 
 
-def pv_control(pv, idx):
-    # PV active and reactive power profiles (will change in the future)
-    return pv.operate(pv.profile[idx], PV_KVAR[idx], idx)
+def bess_control(bess, idx, dt, bess_kw, bess_kvar):
+    return bess.operate(
+        bess_kw[idx],
+        bess_kvar[idx],
+        dt,
+    )
+
+
+def pv_control(pv, idx, pv_kvar):
+    return pv.operate(
+        pv.profile[idx],
+        pv_kvar[idx],
+    )

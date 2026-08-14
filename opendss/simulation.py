@@ -6,39 +6,86 @@ The results include: updated elements with active and reactive power arrays, bus
 
 import py_dss_interface
 import numpy as np
+
 from .devices_control import bess_control, pv_control
 
-def run_simulation(data):
+
+def run_simulation(
+    data,
+    bess_kw,
+    bess_kvar,
+    pv_kvar,
+):
+
     dss = py_dss_interface.DSS()
+
     dss.text("Clear")
 
     _simulation_setup(data, dss)
 
-    data["results"].voltages = {bus: np.zeros(data["steps"]) for bus in dss.circuit.buses_names}
-    data["results"].voltages_pu = {bus: np.zeros(data["steps"]) for bus in dss.circuit.buses_names}
+    data["results"].voltages = {
+        bus: np.zeros(data["steps"])
+        for bus in dss.circuit.buses_names
+    }
+
+    data["results"].voltages_pu = {
+        bus: np.zeros(data["steps"])
+        for bus in dss.circuit.buses_names
+    }
 
     for idx in range(data["steps"]):
-        _update_snapshot_powers(data, dss, idx)
+
+        _update_snapshot_powers(
+            data,
+            dss,
+            idx,
+            bess_kw,
+            bess_kvar,
+            pv_kvar,
+        )
+
         dss.text("Set Tolerance=1e-8")
+
         dss.solution.solve()
+
         for bus in data["results"].voltages:
+
             dss.circuit.set_active_bus(bus)
-            data["results"].voltages[bus][idx] = dss.bus.vmag_angle[0]
-            data["results"].voltages_pu[bus][idx] = dss.bus.vmag_angle[0]/(data["base_kv"] * 1000)
-        data["grid"].array_kw.append(dss.circuit.total_power[0])
-        # Public convention: positive Q means power imported from the grid.
-        data["grid"].array_kvar.append(-dss.circuit.total_power[1])
-        data["results"].costs.append(-data["grid"].array_kw[idx] * data["grid"].prices[idx] * data["dt"])
+
+            data["results"].voltages[bus][idx] = (
+                dss.bus.vmag_angle[0]
+            )
+
+            data["results"].voltages_pu[bus][idx] = (
+                dss.bus.vmag_angle[0]
+                / (data["base_kv"] * 1000)
+            )
+
+        data["grid"].array_kw.append(
+            dss.circuit.total_power[0]
+        )
+
+        # Public convention:
+        # positive Q means power imported from the grid.
+        data["grid"].array_kvar.append(
+            -dss.circuit.total_power[1]
+        )
+
+        data["results"].costs.append(
+            -data["grid"].array_kw[idx]
+            * data["grid"].prices[idx]
+            * data["dt"]
+        )
 
     return {
         "dt": data["dt"],
         "steps": data["steps"],
         "timestamps": data["timestamps"],
-        "grid": data["grid"], 
-        "bess_list": data["bess_list"], 
-        "pv_list": data["pv_list"], 
+        "grid": data["grid"],
+        "bess_list": data["bess_list"],
+        "pv_list": data["pv_list"],
         "load_list": data["load_list"],
-        "results": data["results"]
+        "results": data["results"],
     }
 
 def _simulation_setup(data,dss):
@@ -68,23 +115,49 @@ def _simulation_setup(data,dss):
         New Load.{load.id} bus1={load.bus} phases={data["phases"]} kv={data["base_kv"]} kw=0 kvar=0
         """)
 
-def _update_snapshot_powers(data, dss, idx):
-    '''
-    Update the power values of the loads, PV generators and BESS for a given time step.
-    '''
+def _update_snapshot_powers(
+    data,
+    dss,
+    idx,
+    bess_kw,
+    bess_kvar,
+    pv_kvar,
+):
+
     for load in data["load_list"]:
+
         dss.text(
-            f"Edit Load.{load.id} kw={load.array_kw[idx]} kvar={load.array_kvar[idx]}"
+            f"Edit Load.{load.id} "
+            f"kw={load.array_kw[idx]} "
+            f"kvar={load.array_kvar[idx]}"
         )
 
     for pv in data["pv_list"]:
-        p_pv, q_pv_injection = pv_control(pv,idx)
+
+        p_pv, q_pv_injection = pv_control(
+            pv,
+            idx,
+            pv_kvar,
+        )
+
         dss.text(
-            f"Edit Generator.{pv.id} kw={p_pv} kvar={q_pv_injection}"
+            f"Edit Generator.{pv.id} "
+            f"kw={p_pv} "
+            f"kvar={q_pv_injection}"
         )
 
     for bess in data["bess_list"]:
-        p_bess, q_bess_injection = bess_control(bess,idx,data["dt"])
+
+        p_bess, q_bess_injection = bess_control(
+            bess,
+            idx,
+            data["dt"],
+            bess_kw,
+            bess_kvar,
+        )
+
         dss.text(
-            f"Edit Load.{bess.id} kw={p_bess} kvar={-q_bess_injection}"
+            f"Edit Load.{bess.id} "
+            f"kw={p_bess} "
+            f"kvar={-q_bess_injection}"
         )

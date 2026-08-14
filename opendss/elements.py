@@ -22,8 +22,8 @@ class PV:
         self.array_grid_consumption_kw = []
         self.array_inverter_loss_kw = []
 
-    def operate(self, p_pv, q_pv, idx):
-        available_kw = max(0.0, min(self.profile[idx], self.p_max_kw))
+    def operate(self, p_pv, q_pv):
+        available_kw = max(0.0, min(p_pv, self.p_max_kw))
 
         if available_kw <= 0.0 and not self.night_var:
             q_pv = 0.0
