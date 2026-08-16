@@ -7,7 +7,7 @@ import unittest
 from opendss_env.data import load_data
 from opendss_env.devices_control import bess_control, pv_control
 from opendss_env.elements import BESS
-from opendss_env.envs.simulation import _update_snapshot_powers
+from opendss_env.simulation import _update_snapshot_powers
 
 
 CASE_PATH = Path(__file__).resolve().parents[1] / "examples" / "case5"
