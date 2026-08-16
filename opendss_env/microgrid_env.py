@@ -2,10 +2,10 @@ import gymnasium as gym
 import numpy as np
 import py_dss_interface
 
-from ..data import load_data, split_episodes
-from ..devices_control import (BESS_KW, BESS_KVAR, PV_KVAR, bess_control, pv_control)
+from .data import load_data, split_episodes
 from .states import build_state
 from .rewards import minimize_cost
+from .simulation import _simulation_setup, _update_snapshot_powers, solve_power_flow
 
 class MicrogridEnv(gym.Env):
 
@@ -40,49 +40,7 @@ class MicrogridEnv(gym.Env):
         self.current_cost = 0.0
         self.episode_reward = 0.0
 
-        self._simulation_setup()
-
-    def _simulation_setup(self):
-        """
-        Creates the OpenDSS circuit using the devices defined in the case.
-        """
-
-        self.dss.text("Clear")
-        self.dss.text(f'compile "{self.data["topology"]}"')
-        self.dss.text("Vsource.source.model=Ideal")
-
-        # PV generators
-        for pv in self.episodes[0]["pv_list"]:
-            self.dss.text(f"""New Generator.{pv.id} bus1={pv.bus} phases={self.data["phases"]} kv={self.data["base_kv"]} kw=0 kvar=0""")
-
-        # BESS
-        for bess in self.episodes[0]["bess_list"]:
-            self.dss.text( f""" New Load.{bess.id} bus={bess.bus} phases={self.data["phases"]} kv={self.data["base_kv"]} kw=0 kvar=0 conn=y""")
-
-        # Loads
-        for load in self.episodes[0]["load_list"]:
-            self.dss.text( f""" New Load.{load.id} bus1={load.bus} phases={self.data["phases"]} kv={self.data["base_kv"]} kw=0 kvar=0""")
-
-    def reset(self, *, seed=None, options=None):
-        """
-        Starts an episode. 
-        """
-
-        super().reset(seed=seed)
-
-        if options is not None and "episode_idx" in options:
-            episode_idx = options["episode_idx"]
-        else:
-            episode_idx = 0
-
-        if episode_idx >= self.num_episodes:
-            episode_idx = 0
-
-        self._load_episode(self.start_episode + episode_idx)
-
-        state = build_state(self, self.state_functions)
-
-        return state, {}
+        _simulation_setup(self)
 
     def _load_episode(self, episode_idx):
         """
@@ -116,57 +74,26 @@ class MicrogridEnv(gym.Env):
             for bus in self.dss.circuit.buses_names
         }
 
-    def _update_snapshot_powers(self):
+    def reset(self, *, seed=None, options=None):
         """
-        Updates all loads, PVs and BESSs for the current time step.
-        """
-
-        # Loads
-        for load in self.load_list:
-            self.dss.text( f"Edit Load.{load.id} kw={load.array_kw[self.idx]} kvar={load.array_kvar[self.idx]}")
-
-        # PV
-        for pv_idx, pv in enumerate(self.pv_list):
-            p_pv, q_pv_injection = pv_control(pv, self.idx, PV_KVAR)
-            self.dss.text(f"Edit Generator.{pv.id} kw={p_pv} kvar={q_pv_injection}")
-
-        # BESS
-        for bess_idx, bess in enumerate(self.bess_list):
-            p_bess, q_bess_injection = bess_control(bess, self.idx, self.dt, BESS_KW, BESS_KVAR)
-            self.dss.text(f"Edit Load.{bess.id} kw={p_bess} kvar={-q_bess_injection}")
-
-    def _solve_power_flow(self):
-        """
-        Solves the OpenDSS power flow and updates the results.
+        Starts an episode. 
         """
 
-        self.dss.text("Set Tolerance=1e-8")
-        self.dss.solution.solve()
+        super().reset(seed=seed)
 
-        # Bus voltages
-        for bus in self.results.voltages:
-            self.dss.circuit.set_active_bus(bus)
-            voltage = self.dss.bus.vmag_angle[0]
-            self.results.voltages[bus][self.idx] = voltage
-            self.results.voltages_pu[bus][self.idx] = (voltage / (self.data["base_kv"] * 1000))
+        if options is not None and "episode_idx" in options:
+            episode_idx = options["episode_idx"]
+        else:
+            episode_idx = 0
 
-        # Grid power
-        grid_kw = self.dss.circuit.total_power[0]
-        grid_kvar = -self.dss.circuit.total_power[1]
+        if episode_idx >= self.num_episodes:
+            episode_idx = 0
 
-        self.grid.array_kw.append(grid_kw)
-        self.grid.array_kvar.append(grid_kvar)
+        self._load_episode(self.start_episode + episode_idx)
 
-        # Cost
-        cost = (-grid_kw * self.grid.prices[self.idx]* self.dt)
-        self.results.costs.append(cost)
+        state = build_state(self, self.state_functions)
 
-        self.current_grid_kw = grid_kw
-        self.current_grid_kvar = grid_kvar
-        self.current_cost = cost
-        self.current_voltages_pu = {bus: self.results.voltages_pu[bus][self.idx] for bus in self.results.voltages_pu}
-
-        return grid_kw, grid_kvar, cost
+        return state, {}
 
     def step(self, action=None):
         """
@@ -176,9 +103,9 @@ class MicrogridEnv(gym.Env):
         controls are fixed in devices_control.py.
         """
 
-        self._update_snapshot_powers()
+        _update_snapshot_powers(self)
 
-        grid_kw, grid_kvar, cost = self._solve_power_flow()
+        grid_kw, grid_kvar, cost = solve_power_flow(self)
 
         self.current_cost = cost
 

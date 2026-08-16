@@ -1,12 +1,14 @@
 from pathlib import Path
-from opendss.envs import MicrogridEnv
-from opendss.envs.states import (
-    get_cost,
+from opendss_env import MicrogridEnv
+from opendss_env.states import (
+    get_hour,
+    get_price,
     get_previous_pv_kw,
     get_bess_soc,
     get_previous_load_kw,
 )
-from opendss.envs.rewards import minimize_cost, minimize_voltage_deviation
+from opendss_env.rewards import minimize_cost, minimize_voltage_deviation
+from opendss_env.results_scripts.results import simulation_results
 
 if __name__ == "__main__":
     project_dir = Path(__file__).resolve().parent
@@ -17,7 +19,7 @@ if __name__ == "__main__":
     num_episodes = 1
     start_episode = 0
 
-    reward_function = minimize_cost  # choose the reward function
+    reward_function = minimize_voltage_deviation  # choose the reward function
 
     env = MicrogridEnv(
         case_path=case_path,
@@ -25,7 +27,8 @@ if __name__ == "__main__":
         num_episodes=num_episodes,
         start_episode=start_episode,
         state_functions=[ # choose what the agent observes
-            get_cost,
+            get_hour,
+            get_price,
             get_previous_pv_kw,
             get_bess_soc,
             get_previous_load_kw],
@@ -47,4 +50,6 @@ if __name__ == "__main__":
         episode_reward = results["episode_reward"]
         episode_rewards.append(episode_reward)
 
-        print(f"Episode {episode_idx + 1} total reward \"{reward_function.__name__}\": {episode_reward:.6f}")
+        simulation_results(results, case_path)
+
+        print(f"Episode {episode_idx + 1} total reward \"{reward_function.__name__}\": {episode_reward}")
