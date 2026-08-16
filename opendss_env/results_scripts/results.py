@@ -9,7 +9,7 @@ from pathlib import Path
 
 def simulation_results(results, case_path):
 
-    project_dir = Path(__file__).resolve().parent.parent
+    project_dir = Path(__file__).resolve().parent.parent.parent
 
     output_dir = project_dir / "outputs" / case_path.name
 
