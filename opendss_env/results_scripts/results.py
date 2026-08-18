@@ -22,4 +22,4 @@ def simulation_results(results, case_path):
     save_plots(results, plots_dir)
     save_summary(results, summary_dir)
 
-    print(f"Simulation completed for '{case_path.name}'. \n Results and plots saved in '{output_dir}'.")
+    print(f"Simulation completed for '{case_path.name}'. \nResults and plots saved in '{output_dir}'.")

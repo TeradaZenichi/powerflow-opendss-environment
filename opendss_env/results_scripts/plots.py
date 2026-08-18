@@ -18,6 +18,7 @@ def save_plots(sim_results, output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     _plot_power_flow(sim_results, output_dir)
+    _plot_reactive_power(sim_results, output_dir)
     _plot_bus_voltages(sim_results, output_dir)
     _plot_bus_voltages_pu(sim_results, output_dir)
     _plot_hourly_costs(sim_results, output_dir)
@@ -57,7 +58,7 @@ def _plot_power_flow(sim_results, output_dir):
        bess_kw = np.sum([bess.array_kw for bess in bess_list], axis = 0)
        grid_kw = -np.array(grid.array_kw)
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -90,13 +91,60 @@ def _plot_power_flow(sim_results, output_dir):
        plt.tight_layout()
        plt.savefig(output_dir / "power_flow_plot.png")
 
+def _plot_reactive_power(sim_results, output_dir):
+
+       steps = sim_results["steps"]
+       dt = sim_results["dt"]
+       grid = sim_results["grid"]
+       bess_list = sim_results["bess_list"]
+       pv_list = sim_results["pv_list"]
+       load_list = sim_results["load_list"]
+
+       pv_kvar = np.sum([pv.array_kvar for pv in pv_list], axis=0)
+       load_kvar = np.sum([load.array_kvar for load in load_list], axis=0)
+       bess_kvar = np.sum([bess.array_kvar for bess in bess_list], axis = 0)
+       grid_kvar = np.array(grid.array_kvar)
+
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
+
+       fig, ax = plt.subplots(figsize=(10, 5))
+
+       ax.axhline(0, color="k", linestyle="-.")
+       ax.grid(color="lightgrey")
+
+       ax.plot(hours, load_kvar,
+              color="k",
+              marker="o",
+              label="Load")
+
+       series = [pv_kvar, grid_kvar, bess_kvar]
+       bottoms = _stack_bottoms(*series)
+
+       colors = ["gold", "hotpink", "blueviolet"]
+       labels = ["PV Generation", "Grid", "BESS"]
+
+       for y, bottom, color, label in zip(series, bottoms, colors, labels):
+              ax.bar(hours, y, width=0.9*dt, bottom=bottom, color=color, label=label)
+
+       ax.set_title("Reactive power")
+       ax.set_xlabel("Time [h]")
+       ax.set_ylabel("Reactive power [kvar]")
+
+       ax.set_xticks(hours[::int(1/dt)])
+       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)       
+       ax.legend(loc="upper right")
+       ax.set_axisbelow(True)
+
+       plt.tight_layout()
+       plt.savefig(output_dir / "power_reactive_plot.png")
+
 def _plot_bus_voltages(sim_results, output_dir):
 
        steps = sim_results["steps"]
        voltages = sim_results["results"].voltages
        dt = sim_results["dt"]
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -132,7 +180,7 @@ def _plot_bus_voltages_pu(sim_results, output_dir):
        voltages = sim_results["results"].voltages_pu
        dt = sim_results["dt"]
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -168,7 +216,7 @@ def _plot_hourly_costs(sim_results, output_dir):
        costs = sim_results["results"].costs
        dt = sim_results["dt"]
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -201,7 +249,7 @@ def _plot_bess_energy_level(sim_results, output_dir):
        bess_list = sim_results["bess_list"]
        dt = sim_results["dt"]
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -239,7 +287,7 @@ def _plot_bess_soc(sim_results, output_dir):
        bess_list = sim_results["bess_list"]
        dt = sim_results["dt"]
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
 
        fig, ax = plt.subplots(figsize=(10, 5))
 
@@ -278,7 +326,7 @@ def _plot_price_grid_import(sim_results, output_dir):
        steps = sim_results["steps"]
        dt = sim_results["dt"]
 
-       hours = np.arange(steps) * dt
+       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
        grid_kwh = grid_kw * dt
 
        fig, ax1 = plt.subplots(figsize=(10, 5))

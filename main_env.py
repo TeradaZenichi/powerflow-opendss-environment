@@ -50,6 +50,7 @@ if __name__ == "__main__":
         episode_reward = results["episode_reward"]
         episode_rewards.append(episode_reward)
 
-        simulation_results(results, case_path)
+        if episode_idx == env.num_episodes-1:
+            simulation_results(results, case_path)
 
         print(f"Episode {episode_idx + 1} total reward \"{reward_function.__name__}\": {episode_reward}")
