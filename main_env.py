@@ -13,19 +13,19 @@ from opendss_env.results_scripts.results import simulation_results
 if __name__ == "__main__":
     project_dir = Path(__file__).resolve().parent
 
-    case_path = (project_dir/"examples"/"case5")
+    CASE_PATH = (project_dir/"examples"/"case5")
 
-    episode_steps = 24
-    num_episodes = 1
-    start_episode = 0
+    EPISODE_STEPS = 24
+    NUM_EPISODES = 1
+    START_EPISODE = 0
 
     reward_function = minimize_voltage_deviation  # choose the reward function
 
     env = MicrogridEnv(
-        case_path=case_path,
-        episode_steps=episode_steps,
-        num_episodes=num_episodes,
-        start_episode=start_episode,
+        case_path=CASE_PATH,
+        episode_steps=EPISODE_STEPS,
+        num_episodes=NUM_EPISODES,
+        start_episode=START_EPISODE,
         state_functions=[ # choose what the agent observes
             get_hour,
             get_price,
@@ -51,6 +51,6 @@ if __name__ == "__main__":
         episode_rewards.append(episode_reward)
 
         if episode_idx == env.num_episodes-1:
-            simulation_results(results, case_path)
+            simulation_results(results, CASE_PATH)
 
         print(f"Episode {episode_idx + 1} total reward \"{reward_function.__name__}\": {episode_reward}")

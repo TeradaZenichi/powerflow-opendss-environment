@@ -103,6 +103,8 @@ class MicrogridEnv(gym.Env):
         controls are fixed in devices_control.py.
         """
 
+        # here we would normally apply the action to the BESS and PV devices, but for now, we are ignoring it.
+
         _update_snapshot_powers(self)
 
         grid_kw, grid_kvar, cost = solve_power_flow(self)
