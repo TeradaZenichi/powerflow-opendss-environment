@@ -1,6 +1,6 @@
 from pathlib import Path
 from opendss_env import MicrogridEnv
-from opendss_env.states import get_hour,get_price,get_previous_pv_kw,get_bess_soc,get_previous_load_kw
+from opendss_env.states import get_hour,get_price,get_previous_pv_kw,get_bess_soc,get_previous_load_kw,get_current_load_kw
 from opendss_env.rewards import minimize_cost, minimize_voltage_deviation
 from opendss_env.results_scripts.results import simulation_results
 
@@ -24,6 +24,7 @@ if __name__ == "__main__":
             get_previous_pv_kw,
             get_bess_soc,
             get_previous_load_kw,
+            get_current_load_kw
         ],
         reward_function=minimize_cost,
     )
@@ -39,6 +40,8 @@ if __name__ == "__main__":
             # Fixed control for now
             action = None
             state, reward, terminated, truncated, info = env.step(action)
+            #if state is not None:
+            #    print(state[4],state[5])
 
         results = env.get_episode_results()
 
