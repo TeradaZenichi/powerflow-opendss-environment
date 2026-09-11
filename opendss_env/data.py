@@ -7,6 +7,9 @@ from .elements import BESS, PV, Load, Grid, Results
 
 
 def load_data(path):
+    """
+    Loads the complete dataset from the specified path.
+    """
     path = Path(path).expanduser().resolve()
 
     if not path.is_dir():
@@ -24,14 +27,9 @@ def load_data(path):
     # circuit and line data
     topology = path / cfg["network"]["master"]
 
-    with open(topology, "r", encoding="utf-8") as f:
-        phases = int(
-            re.search(
-                r"phases\s*=\s*(\d+)",
-                f.read(),
-                re.IGNORECASE
-            ).group(1)
-        )
+    with open(topology, "r", encoding="utf-8") as f: 
+        # searches for "phases = x" in topology file and returns x
+        phases = int(re.search(r"phases\s*=\s*(\d+)",f.read(),re.IGNORECASE).group(1))
 
     # devices.json
     with open(path / "devices.json", "r", encoding="utf-8") as f:
@@ -52,7 +50,7 @@ def load_data(path):
 
     timestamps = pd.to_datetime(demand["timestamp"])
 
-    dt = _get_dt_hours(demand)
+    dt = get_dt_hours(demand)
 
     steps = len(demand)
 
@@ -69,61 +67,57 @@ def load_data(path):
         "prices": prices,
     }
 
+def episode_data(data, episode_idx, episode_steps):
+    """ 
+    Returns the data corresponding to one episode.
+    """
 
-def create_episode_data(data, start, end):
+    episode_start = episode_idx * episode_steps
+    episode_end = episode_idx * episode_steps + episode_steps
 
-    bess_list = [
-        BESS(**bess_data)
-        for bess_data in data["devices"].get("bess", [])
-    ]
-
-    pv_list = []
-
-    for pv_data in data["devices"].get("pv", []):
-
-        profile_file, profile_col = pv_data["profile"].split(":")
-
-        pv_list.append(
-            PV(
-                id=pv_data["id"],
-                bus=pv_data["bus"],
-                p_max_kw=pv_data["p_max_kw"],
-                s_max_kva=pv_data["s_max_kva"],
-                q_loss_rated_kw=pv_data["q_loss_rated_kw"],
-                night_var=pv_data["night_var"],
-                profile=data["pv_profiles"][profile_col][start:end],
-                control=pv_data["control"],
-                curtailable=pv_data["curtailable"],
-                power_factor=pv_data["power_factor"],
-            )
+    if episode_end > data["steps"]:
+        raise ValueError(
+            f"Episode {episode_idx+1} with {episode_steps} steps exceeds total steps {data['steps']}"
         )
+    
+    # bess
+    bess_list = [BESS(**bess_data) for bess_data in data["devices"].get("bess", [])]
 
+    # grid
+    grid = Grid(data["prices"][episode_start:episode_end])
+
+    # pv
+    pv_list = []
+    for pv_data in data["devices"].get("pv"):
+        profile_id = pv_data["profile"].split(":",1)[1]
+        profile = data["pv_profiles"][profile_id]
+        episode_profile = profile[episode_start:episode_end]
+
+        pv = PV(**pv_data)
+        pv.profile = episode_profile
+        pv_list.append(pv)
+
+    # load
+    demand = data["demand"][episode_start:episode_end]
     load_list = []
 
     for col in data["demand"].columns:
-
         if col.startswith("Pbus_"):
-
             bus = col[1:]
             q_col = f"Q{bus}"
-
             load_list.append(
                 Load(
                     id=f"Load_{bus}",
                     bus=bus,
-                    array_kw=data["demand"][col].to_numpy()[start:end],
-                    array_kvar=data["demand"][q_col].to_numpy()[start:end],
+                    array_kw=data["demand"][col].to_numpy()[episode_start:episode_end],
+                    array_kvar=data["demand"][q_col].to_numpy()[episode_start:episode_end],
                 )
             )
 
-    grid = Grid(
-        data["prices"][start:end]
-    )
-
     return {
         "dt": data["dt"],
-        "steps": end - start,
-        "timestamps": data["timestamps"].iloc[start:end].reset_index(drop=True),
+        "timestamps": data["timestamps"].iloc[episode_start:episode_end].reset_index(drop=True),
+        "steps": episode_steps,
         "phases": data["phases"],
         "base_kv": data["base_kv"],
         "topology": data["topology"],
@@ -131,34 +125,10 @@ def create_episode_data(data, start, end):
         "bess_list": bess_list,
         "pv_list": pv_list,
         "load_list": load_list,
-        "results": Results(),
+        "results": Results()
     }
 
-
-def split_episodes(data, episode_steps):
-
-    if episode_steps <= 0:
-        raise ValueError("episode_steps must be positive")
-
-    if data["steps"] % episode_steps != 0:
-        raise ValueError(
-            "The number of data steps must be divisible by episode_steps."
-        )
-
-    return [
-        create_episode_data(
-            data,
-            start,
-            start + episode_steps,
-        )
-        for start in range(
-            0,
-            data["steps"],
-            episode_steps,
-        )
-    ]
-
-def _get_dt_hours(df):
+def get_dt_hours(df):
 
     timestamps = pd.to_datetime(df["timestamp"])
 

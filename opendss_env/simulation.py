@@ -15,15 +15,15 @@ def _simulation_setup(env):
     env.dss.text("Vsource.source.model=Ideal")
 
     # PV generators
-    for pv in env.episodes[0]["pv_list"]:
+    for pv in env.pv_list:
         env.dss.text(f"""New Generator.{pv.id} bus1={pv.bus} phases={env.data["phases"]} kv={env.data["base_kv"]} kw=0 kvar=0""")
 
     # BESS
-    for bess in env.episodes[0]["bess_list"]:
+    for bess in env.bess_list:
         env.dss.text( f""" New Load.{bess.id} bus={bess.bus} phases={env.data["phases"]} kv={env.data["base_kv"]} kw=0 kvar=0 conn=y""")
 
     # Loads
-    for load in env.episodes[0]["load_list"]:
+    for load in env.load_list:
         env.dss.text( f""" New Load.{load.id} bus1={load.bus} phases={env.data["phases"]} kv={env.data["base_kv"]} kw=0 kvar=0""")
 
 def _update_snapshot_powers(env):
