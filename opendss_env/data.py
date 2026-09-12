@@ -45,6 +45,7 @@ def load_data(path):
             devices = json.load(f)
     else:
         devices = {}
+    _validate_device_modes(devices)
 
     # PV profiles
     pv_profiles = {}
@@ -205,3 +206,12 @@ def get_dt_hours(df):
 def _require_timestamps(actual, expected, label):
     if not pd.DatetimeIndex(actual).equals(pd.DatetimeIndex(expected)):
         raise ValueError(f"{label} timestamps must exactly match demand.csv")
+
+
+def _validate_device_modes(devices):
+    for kind in ("bess", "pv"):
+        for device in devices.get(kind, []):
+            if str(device.get("connection", "wye")).lower() != "wye":
+                raise ValueError("The environment currently supports wye-connected devices")
+            if str(device.get("dispatch_mode", "aggregate")).lower() != "aggregate":
+                raise ValueError("The environment currently supports aggregate device dispatch")

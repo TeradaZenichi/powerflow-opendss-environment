@@ -9,6 +9,7 @@ import pandas as pd
 
 from opendss_env.data import (
     _require_timestamps,
+    _validate_device_modes,
     episode_data,
     get_dt_hours,
     load_data,
@@ -276,6 +277,16 @@ class ReactiveOperationTest(unittest.TestCase):
     def test_unknown_case_schema_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "schema_version"):
             validate_case_config({"schema_version": 2})
+
+    def test_unsupported_device_modes_are_rejected_instead_of_aggregated(self):
+        with self.assertRaisesRegex(ValueError, "aggregate"):
+            _validate_device_modes({
+                "bess": [{"id": "b1", "dispatch_mode": "per_phase"}]
+            })
+        with self.assertRaisesRegex(ValueError, "wye"):
+            _validate_device_modes({
+                "pv": [{"id": "pv1", "connection": "delta"}]
+            })
 
     def test_actual_measurements_cover_charge_absorption_and_pv_curtailment(self):
         env = MicrogridEnv(

@@ -1,5 +1,7 @@
 import numpy as np
 
+from .contracts import OBSERVATION_SCHEMA_VERSION
+
 
 _PHASE_NAME = {1: "a", 2: "b", 3: "c"}
 
@@ -109,6 +111,7 @@ def build_named_observation(env):
 
     price = float(env.grid.prices[env.idx])
     return {
+        "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
         "timestamp": env.timestamps.iloc[env.idx].isoformat(),
         "dt_h": float(env.dt),
         "phase_order": list(_PHASE_NAME.values())[:env.data["phases"]],

@@ -2,6 +2,7 @@
 .venv/
 myenv/
 __pycache__/
+*.egg-info/
 *.pyc
 *.pyo
 *.pyd

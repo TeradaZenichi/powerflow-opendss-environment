@@ -6,6 +6,12 @@ The environment provides a simulation framework in which loads, photovoltaic (PV
 
 The environment is designed to support future integration with optimization and machine learning methods, in which BESS and PV operating commands can be selected by an agent.
 
+For use as a module from a separate training repository:
+
+```powershell
+python -m pip install -e path\to\powerflow-opendss-environment
+```
+
 ## Running the example
 
 The main simulation is configured in `main_env.py`. The main runtime options are defined at the top of the file:
@@ -237,13 +243,17 @@ charging and `q_injection_kvar > 0` for reactive injection. PV uses positive
 requested, device-limited, and electrically measured operation independently
 comparable.
 
-`env.observe()` returns a named pre-action observation with `timestamp`,
+`env.observe()` returns a named pre-action observation with
+`observation_schema_version`, `timestamp`,
 `dt_h`, phase order, bus voltage/angle/load by phase, grid prices, BESS SoC and
 previous terminal powers, and PV availability and previous terminal powers.
 The same observation is returned in `reset()` info and as `info["observation"]`
 for the action applied by each `step()`. The original numeric state remains
 available through `state_functions` for backward compatibility. Temporal
 history is intentionally assembled by the training application.
+
+Each environment owns an independent OpenDSS context, so multiple environment
+instances can coexist in one process without sharing the active circuit.
 
 The control flow will then become:
 
