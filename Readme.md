@@ -218,6 +218,13 @@ Power values may be aggregate scalars or dictionaries indexed by phase. The
 `executed_action` after device limits, plus `bus_voltages_pu`,
 `bus_angles_deg`, and grid exchange for the solved snapshot.
 
+`info["device_measurements"]` contains the terminal powers read back from the
+solved OpenDSS circuit, by phase and in aggregate. BESS uses `p_net_kw > 0` for
+charging and `q_injection_kvar > 0` for reactive injection. PV uses positive
+`generation_kw` and positive `q_injection_kvar` for injection. This makes the
+requested, device-limited, and electrically measured operation independently
+comparable.
+
 The control flow will then become:
 
 ```text

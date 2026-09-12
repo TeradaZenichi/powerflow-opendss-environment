@@ -16,6 +16,9 @@ class _Circuit:
     def set_active_bus(self, name):
         return _dss.Circuit.SetActiveBus(name)
 
+    def set_active_element(self, name):
+        return _dss.Circuit.SetActiveElement(name)
+
 
 class _Bus:
     @property
@@ -44,12 +47,27 @@ class _Solution:
         return bool(_dss.Solution.Converged())
 
 
+class _CktElement:
+    @property
+    def node_order(self):
+        return _dss.CktElement.NodeOrder()
+
+    @property
+    def num_conductors(self):
+        return _dss.CktElement.NumConductors()
+
+    @property
+    def powers(self):
+        return _dss.CktElement.Powers()
+
+
 class OpenDSSDirectBackend:
     """Expose the subset of OpenDSS used by :class:`MicrogridEnv`."""
 
     def __init__(self):
         self.circuit = _Circuit()
         self.bus = _Bus()
+        self.cktelement = _CktElement()
         self.solution = _Solution()
 
     def text(self, command):

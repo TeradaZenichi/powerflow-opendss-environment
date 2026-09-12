@@ -25,6 +25,61 @@ def _phase_result(value, phases, default_phase_count):
     share = float(value) / len(names)
     return {phase: share for phase in names}
 
+
+def _terminal_power_by_phase(env, element_name):
+    if not env.dss.circuit.set_active_element(element_name):
+        raise RuntimeError(f"OpenDSS element not found: {element_name}")
+
+    conductor_count = env.dss.cktelement.num_conductors
+    nodes = env.dss.cktelement.node_order[:conductor_count]
+    powers = env.dss.cktelement.powers[:2 * conductor_count]
+
+    terminal = {}
+    for position, node in enumerate(nodes):
+        if node not in _PHASE_NAME:
+            continue
+        terminal[_PHASE_NAME[node]] = {
+            "p_kw": float(powers[2 * position]),
+            "q_kvar": float(powers[2 * position + 1]),
+        }
+    return terminal
+
+
+def collect_device_measurements(env):
+    """Read solved terminal powers and convert them to the public convention."""
+
+    measurements = {"bess": {}, "pv": {}}
+
+    for bess in env.bess_list:
+        terminal = _terminal_power_by_phase(env, f"Load.{bess.id}")
+        p_net = {phase: value["p_kw"] for phase, value in terminal.items()}
+        q_injection = {
+            phase: -value["q_kvar"] for phase, value in terminal.items()
+        }
+        measurements["bess"][bess.id] = {
+            "p_net_kw": p_net,
+            "q_injection_kvar": q_injection,
+            "p_net_total_kw": sum(p_net.values()),
+            "q_injection_total_kvar": sum(q_injection.values()),
+        }
+
+    for pv in env.pv_list:
+        terminal = _terminal_power_by_phase(env, f"Generator.{pv.id}")
+        generation = {
+            phase: -value["p_kw"] for phase, value in terminal.items()
+        }
+        q_injection = {
+            phase: -value["q_kvar"] for phase, value in terminal.items()
+        }
+        measurements["pv"][pv.id] = {
+            "generation_kw": generation,
+            "q_injection_kvar": q_injection,
+            "generation_total_kw": sum(generation.values()),
+            "q_injection_total_kvar": sum(q_injection.values()),
+        }
+
+    return measurements
+
 def _simulation_setup(env):
     """
     Creates the OpenDSS circuit using the devices defined in the case.
@@ -73,6 +128,7 @@ def _update_snapshot_powers(env, action=None):
 
     # PV
     for pv_idx, pv in enumerate(env.pv_list):
+        available_kw = float(pv.profile[env.idx])
         if action is None:
             p_pv, q_pv_injection = pv_control(pv, env.idx, PV_KVAR)
         else:
@@ -82,18 +138,31 @@ def _update_snapshot_powers(env, action=None):
             p_pv, q_pv_injection = pv.operate(
                 _aggregate(command["generation_kw"]),
                 _aggregate(command.get("q_injection_kvar", 0.0)),
-                available_kw=pv.profile[env.idx],
+                available_kw=available_kw,
             )
         env.dss.text(f"Edit Generator.{pv.id} kw={p_pv} kvar={q_pv_injection}")
+        generation_kw = pv.array_kw[-1]
+        inverter_loss_kw = pv.array_inverter_loss_kw[-1]
         applied["pv"][pv.id] = {
-            "generation_kw": _phase_result(p_pv, pv.phases, env.data["phases"]),
+            "generation_kw": _phase_result(
+                generation_kw, pv.phases, env.data["phases"]
+            ),
             "q_injection_kvar": _phase_result(
                 q_pv_injection, pv.phases, env.data["phases"]
             ),
+            "generation_total_kw": generation_kw,
+            "p_injection_total_kw": p_pv,
+            "q_injection_total_kvar": q_pv_injection,
+            "available_kw": available_kw,
+            "curtailment_kw": max(
+                available_kw - generation_kw - inverter_loss_kw, 0.0
+            ),
+            "inverter_loss_kw": inverter_loss_kw,
         }
 
     # BESS
     for bess_idx, bess in enumerate(env.bess_list):
+        soc_before_frac = bess.soc
         if action is None:
             p_bess, q_bess_injection = bess_control(
                 bess, env.idx, env.dt, BESS_KW, BESS_KVAR
@@ -113,7 +182,11 @@ def _update_snapshot_powers(env, action=None):
             "q_injection_kvar": _phase_result(
                 q_bess_injection, bess.phases, env.data["phases"]
             ),
+            "p_net_total_kw": p_bess,
+            "q_injection_total_kvar": q_bess_injection,
+            "soc_before_frac": soc_before_frac,
             "soc_after_frac": bess.soc,
+            "inverter_loss_kw": bess.array_inverter_loss_kw[-1],
         }
 
     return applied
@@ -183,5 +256,6 @@ def solve_power_flow(env):
         }
         for bus, phases in env.results.phase_angles_deg.items()
     }
+    env.current_device_measurements = collect_device_measurements(env)
 
     return grid_kw, grid_kvar, cost

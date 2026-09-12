@@ -14,7 +14,12 @@ from opendss_env.devices_control import (
     pv_control,
 )
 from opendss_env.elements import BESS
-from opendss_env.simulation import _update_snapshot_powers
+from opendss_env.microgrid_env import MicrogridEnv
+from opendss_env.simulation import (
+    _update_snapshot_powers,
+    collect_device_measurements,
+)
+from opendss_env.states import get_bess_soc
 
 
 CASE_PATH = Path(__file__).resolve().parents[1] / "examples" / "case5"
@@ -26,6 +31,35 @@ class _FakeDSS:
 
     def text(self, command):
         self.commands.append(command)
+
+
+class _FakeTerminalDSS:
+    def __init__(self):
+        self.circuit = self
+        self.cktelement = self
+        self.active_element = None
+        self.elements = {
+            "Load.b1": [-6.0, -2.0, -6.0, -2.0, -6.0, -2.0, 0.0, 0.0],
+            "Generator.pv1": [
+                -30.0, -5.0, -30.0, -5.0, -30.0, -5.0, 0.0, 0.0
+            ],
+        }
+
+    def set_active_element(self, name):
+        self.active_element = name
+        return int(name in self.elements)
+
+    @property
+    def num_conductors(self):
+        return 4
+
+    @property
+    def node_order(self):
+        return [1, 2, 3, 0]
+
+    @property
+    def powers(self):
+        return self.elements[self.active_element]
 
 
 class ReactiveOperationTest(unittest.TestCase):
@@ -132,6 +166,101 @@ class ReactiveOperationTest(unittest.TestCase):
         self.assertAlmostEqual(
             sum(executed["bess"]["b1"]["q_injection_kvar"].values()), 10.0
         )
+        self.assertAlmostEqual(executed["bess"]["b1"]["soc_before_frac"], 0.5)
+        self.assertAlmostEqual(
+            executed["bess"]["b1"]["soc_after_frac"], 0.2892736842
+        )
+
+    def test_step_reports_actual_terminal_powers(self):
+        env = MicrogridEnv(
+            CASE_PATH,
+            episode_steps=24,
+            num_episodes=1,
+            start_episode=0,
+            state_functions=[get_bess_soc],
+        )
+        env.reset()
+        action = {
+            "bess": {
+                "b1": {"p_net_kw": -20.0, "q_injection_kvar": 10.0}
+            },
+            "pv": {
+                "pv1": {"generation_kw": 0.0, "q_injection_kvar": 0.0}
+            },
+        }
+
+        _, _, _, _, info = env.step(action)
+
+        bess = info["device_measurements"]["bess"]["b1"]
+        pv = info["device_measurements"]["pv"]["pv1"]
+        self.assertEqual(set(bess["p_net_kw"]), {"a"})
+        self.assertAlmostEqual(bess["p_net_total_kw"], -20.0, places=5)
+        self.assertAlmostEqual(bess["q_injection_total_kvar"], 10.0, places=5)
+        self.assertAlmostEqual(pv["generation_total_kw"], 0.0, places=5)
+        self.assertAlmostEqual(pv["q_injection_total_kvar"], 0.0, places=5)
+
+    def test_actual_measurements_cover_charge_absorption_and_pv_curtailment(self):
+        env = MicrogridEnv(
+            CASE_PATH,
+            episode_steps=24,
+            num_episodes=1,
+            start_episode=0,
+            state_functions=[get_bess_soc],
+        )
+        env.reset()
+        idle = {
+            "bess": {
+                "b1": {"p_net_kw": 0.0, "q_injection_kvar": 0.0}
+            },
+            "pv": {
+                "pv1": {"generation_kw": 0.0, "q_injection_kvar": 0.0}
+            },
+        }
+        for _ in range(6):
+            env.step(idle)
+
+        action = {
+            "bess": {
+                "b1": {"p_net_kw": 10.0, "q_injection_kvar": -5.0}
+            },
+            "pv": {
+                "pv1": {"generation_kw": 5.0, "q_injection_kvar": -2.0}
+            },
+        }
+        _, _, _, _, info = env.step(action)
+
+        executed_bess = info["executed_action"]["bess"]["b1"]
+        executed_pv = info["executed_action"]["pv"]["pv1"]
+        measured_bess = info["device_measurements"]["bess"]["b1"]
+        measured_pv = info["device_measurements"]["pv"]["pv1"]
+        self.assertAlmostEqual(measured_bess["p_net_total_kw"], 10.0, places=5)
+        self.assertAlmostEqual(
+            measured_bess["q_injection_total_kvar"], -5.0, places=5
+        )
+        self.assertAlmostEqual(measured_pv["generation_total_kw"], 5.0, places=5)
+        self.assertAlmostEqual(
+            measured_pv["q_injection_total_kvar"], -2.0, places=5
+        )
+        self.assertAlmostEqual(executed_bess["p_net_total_kw"], 10.0)
+        self.assertAlmostEqual(executed_pv["available_kw"], 10.0)
+        self.assertGreater(executed_pv["curtailment_kw"], 4.9)
+
+    def test_three_phase_terminal_measurements_follow_public_signs(self):
+        env = SimpleNamespace(
+            dss=_FakeTerminalDSS(),
+            bess_list=[SimpleNamespace(id="b1")],
+            pv_list=[SimpleNamespace(id="pv1")],
+        )
+
+        measurements = collect_device_measurements(env)
+
+        bess = measurements["bess"]["b1"]
+        pv = measurements["pv"]["pv1"]
+        self.assertEqual(set(bess["p_net_kw"]), {"a", "b", "c"})
+        self.assertEqual(bess["p_net_kw"], {"a": -6.0, "b": -6.0, "c": -6.0})
+        self.assertEqual(bess["q_injection_total_kvar"], 6.0)
+        self.assertEqual(pv["generation_total_kw"], 90.0)
+        self.assertEqual(pv["q_injection_total_kvar"], 15.0)
 
 
 if __name__ == "__main__":

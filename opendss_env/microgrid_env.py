@@ -25,6 +25,7 @@ class MicrogridEnv(gym.Env):
 
         self.dss = OpenDSSDirectBackend()
         self.current_cost = 0.0
+        self.current_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
 
         self.load_episode_data(self.start_episode)
@@ -54,6 +55,7 @@ class MicrogridEnv(gym.Env):
 
         self.idx = 0
         self.current_cost = 0.0
+        self.current_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
 
         _simulation_setup(self)
@@ -97,6 +99,7 @@ class MicrogridEnv(gym.Env):
             "bus_angles_deg": self.current_bus_angles_deg,
             "requested_action": action,
             "executed_action": applied_action,
+            "device_measurements": self.current_device_measurements,
         }
 
         return state, reward, terminated, truncated, info
