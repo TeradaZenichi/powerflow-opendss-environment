@@ -85,6 +85,18 @@ The exact case files can be adapted to represent different microgrids or distrib
 | `pv.csv`         | PV availability profile                                                     |
 | `dss/Master.dss` | OpenDSS network topology and electrical parameters                          |
 
+`MicrogridEnv` accepts either the case directory or the JSON configuration
+file. Paths inside the configuration are relative to that file, so an external
+training repository can own one scenario and pass the same path to both this
+environment and `opf-teacher`. The optional `files` object selects the demand,
+price, and device files; conventional names are used when it is absent. Both
+modules currently use `"schema_version": 1`.
+
+```python
+case_source = "scenarios/network_01/config.json"  # directory also accepted
+env = MicrogridEnv(case_path=case_source, ...)
+```
+
 The case data is loaded by `data.py`. The data loader also divides the available time series into episodes according to the parameters provided to the environment.
 
 ## Simulation with OpenDSS
@@ -224,6 +236,14 @@ charging and `q_injection_kvar > 0` for reactive injection. PV uses positive
 `generation_kw` and positive `q_injection_kvar` for injection. This makes the
 requested, device-limited, and electrically measured operation independently
 comparable.
+
+`env.observe()` returns a named pre-action observation with `timestamp`,
+`dt_h`, phase order, bus voltage/angle/load by phase, grid prices, BESS SoC and
+previous terminal powers, and PV availability and previous terminal powers.
+The same observation is returned in `reset()` info and as `info["observation"]`
+for the action applied by each `step()`. The original numeric state remains
+available through `state_functions` for backward compatibility. Temporal
+history is intentionally assembled by the training application.
 
 The control flow will then become:
 

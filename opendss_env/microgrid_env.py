@@ -3,9 +3,14 @@ import numpy as np
 
 from .backend import OpenDSSDirectBackend
 from .data import load_data, episode_data
-from .states import build_state
+from .states import build_named_observation, build_state
 from .rewards import minimize_cost
-from .simulation import _simulation_setup, _update_snapshot_powers, solve_power_flow
+from .simulation import (
+    _simulation_setup,
+    _update_snapshot_powers,
+    initialize_pre_action_observation,
+    solve_power_flow,
+)
 
 
 class MicrogridEnv(gym.Env):
@@ -22,6 +27,8 @@ class MicrogridEnv(gym.Env):
         self.end_episode = start_episode + num_episodes
 
         self.data = load_data(case_path)
+        self.case_path = self.data["case_path"]
+        self.config_path = self.data["config_path"]
 
         self.dss = OpenDSSDirectBackend()
         self.current_cost = 0.0
@@ -66,11 +73,14 @@ class MicrogridEnv(gym.Env):
         self.results.phase_voltages_pu = {bus: {} for bus in self.dss.circuit.buses_names}
         self.results.phase_angles_deg = {bus: {} for bus in self.dss.circuit.buses_names}
 
+        initialize_pre_action_observation(self)
+
         state = build_state(self, self.state_functions)
 
-        return state, {}
+        return state, {"observation": self.observe()}
 
     def step(self, action=None):
+        observation = self.observe()
         applied_action = _update_snapshot_powers(self, action)
         grid_kw, grid_kvar, cost = solve_power_flow(self)
 
@@ -100,9 +110,13 @@ class MicrogridEnv(gym.Env):
             "requested_action": action,
             "executed_action": applied_action,
             "device_measurements": self.current_device_measurements,
+            "observation": observation,
         }
 
         return state, reward, terminated, truncated, info
+
+    def observe(self):
+        return build_named_observation(self)
 
     def get_episode_results(self):
         return {

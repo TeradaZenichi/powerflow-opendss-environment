@@ -65,6 +65,7 @@ class OpenDSSDirectBackend:
     """Expose the subset of OpenDSS used by :class:`MicrogridEnv`."""
 
     def __init__(self):
+        _dss.Basic.AllowChangeDir(False)
         self.circuit = _Circuit()
         self.bus = _Bus()
         self.cktelement = _CktElement()

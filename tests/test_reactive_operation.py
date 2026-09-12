@@ -5,7 +5,15 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-from opendss_env.data import episode_data, load_data
+import pandas as pd
+
+from opendss_env.data import (
+    _require_timestamps,
+    episode_data,
+    get_dt_hours,
+    load_data,
+)
+from opendss_env.case_source import validate_case_config
 from opendss_env.devices_control import (
     BESS_KVAR,
     BESS_KW,
@@ -198,6 +206,76 @@ class ReactiveOperationTest(unittest.TestCase):
         self.assertAlmostEqual(bess["q_injection_total_kvar"], 10.0, places=5)
         self.assertAlmostEqual(pv["generation_total_kw"], 0.0, places=5)
         self.assertAlmostEqual(pv["q_injection_total_kvar"], 0.0, places=5)
+
+    def test_named_observation_is_pre_action_and_advances_causally(self):
+        working_directory = Path.cwd()
+        env = MicrogridEnv(
+            CASE_PATH,
+            episode_steps=24,
+            num_episodes=1,
+            start_episode=0,
+            state_functions=[get_bess_soc],
+        )
+        _, reset_info = env.reset()
+        self.assertEqual(Path.cwd(), working_directory)
+        before = reset_info["observation"]
+        action = {
+            "bess": {
+                "b1": {"p_net_kw": -20.0, "q_injection_kvar": 10.0}
+            },
+            "pv": {
+                "pv1": {"generation_kw": 0.0, "q_injection_kvar": 0.0}
+            },
+        }
+
+        _, _, _, _, info = env.step(action)
+        after = env.observe()
+
+        self.assertEqual(info["observation"], before)
+        self.assertEqual(before["timestamp"], "2026-01-01T00:00:00")
+        self.assertEqual(after["timestamp"], "2026-01-01T01:00:00")
+        self.assertEqual(before["phase_order"], ["a"])
+        self.assertAlmostEqual(before["bess"]["b1"]["soc_before_frac"], 0.5)
+        self.assertAlmostEqual(
+            after["bess"]["b1"]["soc_before_frac"],
+            info["executed_action"]["bess"]["b1"]["soc_after_frac"],
+        )
+        self.assertAlmostEqual(
+            after["bess"]["b1"]["previous_p_kw"]["a"], -20.0, places=5
+        )
+        self.assertAlmostEqual(
+            after["bess"]["b1"]["previous_q_kvar"]["a"], 10.0, places=5
+        )
+        self.assertAlmostEqual(
+            before["buses"]["bus_002"]["p_load_kw"]["a"], 100.0
+        )
+        self.assertGreater(
+            before["buses"]["bus_002"]["v_before_pu"]["a"], 0.0
+        )
+
+    def test_time_contract_rejects_misaligned_or_irregular_series(self):
+        expected = pd.Series(pd.date_range("2026-01-01", periods=3, freq="h"))
+        shifted = expected + pd.Timedelta(minutes=5)
+        with self.assertRaisesRegex(ValueError, "exactly match"):
+            _require_timestamps(shifted, expected, "pv.csv")
+
+        irregular = pd.DataFrame({
+            "timestamp": [expected.iloc[0], expected.iloc[1], expected.iloc[2] + pd.Timedelta(minutes=5)]
+        })
+        with self.assertRaisesRegex(ValueError, "equally spaced"):
+            get_dt_hours(irregular)
+
+    def test_configuration_file_and_directory_resolve_to_same_case(self):
+        directory_data = load_data(CASE_PATH)
+        file_data = load_data(CASE_PATH / "config.json")
+
+        self.assertEqual(directory_data["case_path"], file_data["case_path"])
+        self.assertEqual(directory_data["config_path"], file_data["config_path"])
+        self.assertEqual(directory_data["steps"], file_data["steps"])
+
+    def test_unknown_case_schema_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "schema_version"):
+            validate_case_config({"schema_version": 2})
 
     def test_actual_measurements_cover_charge_absorption_and_pv_curtailment(self):
         env = MicrogridEnv(

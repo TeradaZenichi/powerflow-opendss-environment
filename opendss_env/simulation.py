@@ -80,6 +80,46 @@ def collect_device_measurements(env):
 
     return measurements
 
+
+def collect_bus_measurements(env):
+    voltages_pu = {}
+    angles_deg = {}
+    voltages = {}
+    for bus in env.dss.circuit.buses_names:
+        env.dss.circuit.set_active_bus(bus)
+        nodes = env.dss.bus.nodes
+        voltage_values = env.dss.bus.vmag_angle
+        pu_values = env.dss.bus.pu_vmag_angle
+        voltages[bus] = {}
+        voltages_pu[bus] = {}
+        angles_deg[bus] = {}
+        for position, node in enumerate(nodes):
+            if node not in _PHASE_NAME:
+                continue
+            phase = _PHASE_NAME[node]
+            voltages[bus][phase] = float(voltage_values[2 * position])
+            voltages_pu[bus][phase] = float(pu_values[2 * position])
+            angles_deg[bus][phase] = float(pu_values[2 * position + 1])
+    return voltages, voltages_pu, angles_deg
+
+
+def initialize_pre_action_observation(env):
+    """Solve the reset snapshot with current loads and idle controllable devices."""
+
+    for load in env.load_list:
+        env.dss.text(
+            f"Edit Load.{load.id} kw={load.array_kw[env.idx]} "
+            f"kvar={load.array_kvar[env.idx]}"
+        )
+    env.dss.text("Set Tolerance=1e-8")
+    env.dss.solution.solve()
+    if not env.dss.solution.converged:
+        raise RuntimeError("OpenDSS did not converge while initializing observation")
+    _, env.current_bus_voltages_pu, env.current_bus_angles_deg = (
+        collect_bus_measurements(env)
+    )
+    env.current_device_measurements = collect_device_measurements(env)
+
 def _simulation_setup(env):
     """
     Creates the OpenDSS circuit using the devices defined in the case.
@@ -201,28 +241,21 @@ def solve_power_flow(env):
     if not env.dss.solution.converged:
         raise RuntimeError(f"OpenDSS did not converge at timestep {env.idx}")
 
-    # Bus voltages
+    voltages, voltages_pu, angles_deg = collect_bus_measurements(env)
     for bus in env.results.voltages:
-        env.dss.circuit.set_active_bus(bus)
-        nodes = env.dss.bus.nodes
-        voltage_values = env.dss.bus.vmag_angle
-        pu_values = env.dss.bus.pu_vmag_angle
-        voltage_by_phase = {}
-        pu_by_phase = {}
-        angle_by_phase = {}
-        for position, node in enumerate(nodes):
-            if node not in _PHASE_NAME:
-                continue
-            phase = _PHASE_NAME[node]
-            voltage_by_phase[phase] = voltage_values[2 * position]
-            pu_by_phase[phase] = pu_values[2 * position]
-            angle_by_phase[phase] = pu_values[2 * position + 1]
-            env.results.phase_voltages[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = voltage_by_phase[phase]
-            env.results.phase_voltages_pu[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = pu_by_phase[phase]
-            env.results.phase_angles_deg[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = angle_by_phase[phase]
-        first_phase = next(iter(pu_by_phase))
-        env.results.voltages[bus][env.idx] = voltage_by_phase[first_phase]
-        env.results.voltages_pu[bus][env.idx] = pu_by_phase[first_phase]
+        for phase, value in voltages[bus].items():
+            env.results.phase_voltages[bus].setdefault(
+                phase, np.zeros(env.steps)
+            )[env.idx] = value
+            env.results.phase_voltages_pu[bus].setdefault(
+                phase, np.zeros(env.steps)
+            )[env.idx] = voltages_pu[bus][phase]
+            env.results.phase_angles_deg[bus].setdefault(
+                phase, np.zeros(env.steps)
+            )[env.idx] = angles_deg[bus][phase]
+        first_phase = next(iter(voltages_pu[bus]))
+        env.results.voltages[bus][env.idx] = voltages[bus][first_phase]
+        env.results.voltages_pu[bus][env.idx] = voltages_pu[bus][first_phase]
 
     # Grid power
     grid_kw = env.dss.circuit.total_power[0]
@@ -242,20 +275,8 @@ def solve_power_flow(env):
         bus: env.results.voltages_pu[bus][env.idx]
         for bus in env.results.voltages_pu
     }
-    env.current_bus_voltages_pu = {
-        bus: {
-            phase: values[env.idx]
-            for phase, values in phases.items()
-        }
-        for bus, phases in env.results.phase_voltages_pu.items()
-    }
-    env.current_bus_angles_deg = {
-        bus: {
-            phase: values[env.idx]
-            for phase, values in phases.items()
-        }
-        for bus, phases in env.results.phase_angles_deg.items()
-    }
+    env.current_bus_voltages_pu = voltages_pu
+    env.current_bus_angles_deg = angles_deg
     env.current_device_measurements = collect_device_measurements(env)
 
     return grid_kw, grid_kvar, cost
