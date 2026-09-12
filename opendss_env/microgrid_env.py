@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
-import py_dss_interface
 
+from .backend import OpenDSSDirectBackend
 from .data import load_data, episode_data
 from .states import build_state
 from .rewards import minimize_cost
@@ -23,7 +23,7 @@ class MicrogridEnv(gym.Env):
 
         self.data = load_data(case_path)
 
-        self.dss = py_dss_interface.DSS()
+        self.dss = OpenDSSDirectBackend()
         self.current_cost = 0.0
         self.episode_reward = 0.0
 
@@ -56,15 +56,20 @@ class MicrogridEnv(gym.Env):
         self.current_cost = 0.0
         self.episode_reward = 0.0
 
+        _simulation_setup(self)
+
         self.results.voltages = {bus: np.zeros(self.steps) for bus in self.dss.circuit.buses_names}
         self.results.voltages_pu = {bus: np.zeros(self.steps) for bus in self.dss.circuit.buses_names}
+        self.results.phase_voltages = {bus: {} for bus in self.dss.circuit.buses_names}
+        self.results.phase_voltages_pu = {bus: {} for bus in self.dss.circuit.buses_names}
+        self.results.phase_angles_deg = {bus: {} for bus in self.dss.circuit.buses_names}
 
         state = build_state(self, self.state_functions)
 
         return state, {}
 
     def step(self, action=None):
-        _update_snapshot_powers(self)
+        applied_action = _update_snapshot_powers(self, action)
         grid_kw, grid_kvar, cost = solve_power_flow(self)
 
         self.current_cost = cost
@@ -80,7 +85,19 @@ class MicrogridEnv(gym.Env):
         else:
             state = build_state(self, self.state_functions)
 
-        info = {"cost": cost, "reward": reward, "grid_kw": grid_kw, "grid_kvar": grid_kvar}
+        info = {
+            "timestamp": self.timestamps.iloc[self.idx - 1],
+            "cost": cost,
+            "reward": reward,
+            "grid_kw": grid_kw,
+            "grid_kvar": grid_kvar,
+            "grid_import_kw": max(-grid_kw, 0.0),
+            "grid_export_kw": max(grid_kw, 0.0),
+            "bus_voltages_pu": self.current_bus_voltages_pu,
+            "bus_angles_deg": self.current_bus_angles_deg,
+            "requested_action": action,
+            "executed_action": applied_action,
+        }
 
         return state, reward, terminated, truncated, info
 

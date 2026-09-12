@@ -9,6 +9,8 @@ The plots include:
 - Prices vs Grid Import plot
 '''
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path

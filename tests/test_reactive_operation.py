@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
-from opendss_env.data import load_data
-from opendss_env.devices_control import bess_control, pv_control
+from opendss_env.data import episode_data, load_data
+from opendss_env.devices_control import (
+    BESS_KVAR,
+    BESS_KW,
+    PV_KVAR,
+    bess_control,
+    pv_control,
+)
 from opendss_env.elements import BESS
 from opendss_env.simulation import _update_snapshot_powers
 
@@ -22,6 +29,14 @@ class _FakeDSS:
 
 
 class ReactiveOperationTest(unittest.TestCase):
+    def episode(self):
+        data = load_data(CASE_PATH)
+        return data, episode_data(data, 0, data["steps"])
+
+    def fake_env(self):
+        data, episode = self.episode()
+        return SimpleNamespace(data=data, dss=_FakeDSS(), idx=0, **episode)
+
     def test_bess_applies_capability_and_reactive_loss(self):
         bess = BESS(
             id="b1", bus="bus_004", e_cap_kwh=100.0,
@@ -41,13 +56,13 @@ class ReactiveOperationTest(unittest.TestCase):
         self.assertLessEqual(math.hypot(p_bess, q_bess), bess.s_max_kva)
 
     def test_reference_controls_reproduce_teacher_reactive_profiles(self):
-        data = load_data(CASE_PATH)
-        bess = data["bess_list"][0]
-        pv = data["pv_list"][0]
+        data, episode = self.episode()
+        bess = episode["bess_list"][0]
+        pv = episode["pv_list"][0]
 
         for idx in range(data["steps"]):
-            bess_control(bess, idx, data["dt"])
-            pv_control(pv, idx)
+            bess_control(bess, idx, data["dt"], BESS_KW, BESS_KVAR)
+            pv_control(pv, idx, PV_KVAR)
 
         self.assertAlmostEqual(bess.soc, bess.soc_init_frac, places=5)
         self.assertGreater(max(bess.array_kvar), 25.0)
@@ -75,29 +90,48 @@ class ReactiveOperationTest(unittest.TestCase):
         ))
 
     def test_bess_q_sign_is_converted_only_at_opendss_boundary(self):
-        data = load_data(CASE_PATH)
-        dss = _FakeDSS()
-
-        _update_snapshot_powers(data, dss, 0)
+        env = self.fake_env()
+        _update_snapshot_powers(env)
 
         bess_command = next(
-            command for command in dss.commands if "Edit Load.b1" in command
+            command for command in env.dss.commands if "Edit Load.b1" in command
         )
         self.assertIn("kvar=-9.364064", bess_command)
-        self.assertAlmostEqual(data["bess_list"][0].array_kvar[0], 9.364064)
+        self.assertAlmostEqual(env.bess_list[0].array_kvar[0], 9.364064)
 
     def test_pv_q_keeps_injection_sign_at_opendss_boundary(self):
-        data = load_data(CASE_PATH)
-        dss = _FakeDSS()
+        env = self.fake_env()
 
         for idx in range(7):
-            _update_snapshot_powers(data, dss, idx)
+            env.idx = idx
+            _update_snapshot_powers(env)
 
         pv_commands = [
-            command for command in dss.commands if "Edit Generator.pv1" in command
+            command for command in env.dss.commands if "Edit Generator.pv1" in command
         ]
         self.assertIn("kvar=27.09902", pv_commands[-1])
-        self.assertAlmostEqual(data["pv_list"][0].array_kvar[-1], 27.099020)
+        self.assertAlmostEqual(env.pv_list[0].array_kvar[-1], 27.099020)
+
+    def test_named_action_reports_executed_values(self):
+        env = self.fake_env()
+        action = {
+            "bess": {
+                "b1": {"p_net_kw": -20.0, "q_injection_kvar": 10.0}
+            },
+            "pv": {
+                "pv1": {"generation_kw": 0.0, "q_injection_kvar": 0.0}
+            },
+        }
+
+        executed = _update_snapshot_powers(env, action)
+
+        self.assertEqual(set(executed["bess"]["b1"]["p_net_kw"]), {"a"})
+        self.assertAlmostEqual(
+            sum(executed["bess"]["b1"]["p_net_kw"].values()), -20.0
+        )
+        self.assertAlmostEqual(
+            sum(executed["bess"]["b1"]["q_injection_kvar"].values()), 10.0
+        )
 
 
 if __name__ == "__main__":

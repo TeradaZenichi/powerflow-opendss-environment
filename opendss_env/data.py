@@ -6,6 +6,10 @@ import copy
 from .elements import BESS, PV, Load, Grid, Results
 
 
+_PHASE_DEMAND = re.compile(r"^P(.+)_([abcABC123])$")
+_PHASE_NODE = {"a": 1, "b": 2, "c": 3, "1": 1, "2": 2, "3": 3}
+
+
 def load_data(path):
     """
     Loads the complete dataset from the specified path.
@@ -88,7 +92,7 @@ def episode_data(data, episode_idx, episode_steps):
 
     # pv
     pv_list = []
-    for pv_data in data["devices"].get("pv"):
+    for pv_data in data["devices"].get("pv", []):
         profile_id = pv_data["profile"].split(":",1)[1]
         profile = data["pv_profiles"][profile_id]
         episode_profile = profile[episode_start:episode_end]
@@ -103,14 +107,22 @@ def episode_data(data, episode_idx, episode_steps):
 
     for col in data["demand"].columns:
         if col.startswith("Pbus_"):
-            bus = col[1:]
-            q_col = f"Q{bus}"
+            phase_match = _PHASE_DEMAND.fullmatch(col)
+            if phase_match:
+                bus, phase = phase_match.groups()
+                phase_node = _PHASE_NODE[phase.lower()]
+                q_col = f"Q{bus}_{phase}"
+            else:
+                bus = col[1:]
+                phase, phase_node = None, None
+                q_col = f"Q{bus}"
             load_list.append(
                 Load(
-                    id=f"Load_{bus}",
+                    id=f"Load_{bus}" + (f"_{phase.lower()}" if phase else ""),
                     bus=bus,
                     array_kw=data["demand"][col].to_numpy()[episode_start:episode_end],
                     array_kvar=data["demand"][q_col].to_numpy()[episode_start:episode_end],
+                    phase_node=phase_node,
                 )
             )
 

@@ -1,28 +1,35 @@
 import math
 
 class Load:
-    def __init__(self, id, bus, array_kw, array_kvar):
+    def __init__(self, id, bus, array_kw, array_kvar, phase_node=None):
         self.id = id
         self.bus = bus
         self.array_kw = array_kw
         self.array_kvar = array_kvar
+        self.phase_node = phase_node
 
 class PV:
     def __init__(self, id, bus, p_max_kw, s_max_kva, q_loss_rated_kw, night_var,
-                 profile, control, curtailable, power_factor):
+                 profile, control, curtailable, power_factor, phases=None,
+                 connection="wye", dispatch_mode="aggregate", phase_profiles=None):
         self.id, self.bus = id, bus
         self.p_max_kw, self.s_max_kva = p_max_kw, s_max_kva
         self.q_loss_rated_kw, self.night_var = q_loss_rated_kw, night_var
         self.profile, self.control = profile, control
         self.curtailable, self.power_factor = curtailable, power_factor
+        self.phases = tuple(phases or ())
+        self.connection, self.dispatch_mode = connection, dispatch_mode
+        self.phase_profiles = phase_profiles or {}
         self.array_kw = []
         self.array_kvar = []
         self.array_p_net_kw = []
         self.array_grid_consumption_kw = []
         self.array_inverter_loss_kw = []
 
-    def operate(self, p_pv, q_pv):
-        available_kw = max(0.0, min(p_pv, self.p_max_kw))
+    def operate(self, p_pv, q_pv, available_kw=None):
+        requested_kw = p_pv
+        available_kw = p_pv if available_kw is None else available_kw
+        available_kw = max(0.0, min(available_kw, self.p_max_kw))
 
         if available_kw <= 0.0 and not self.night_var:
             q_pv = 0.0
@@ -40,7 +47,7 @@ class PV:
             max(available_kw - inverter_loss_kw, 0.0),
         )
         if self.curtailable:
-            generation_kw = max(0.0, min(p_pv, generation_limit_kw))
+            generation_kw = max(0.0, min(requested_kw, generation_limit_kw))
         else:
             generation_kw = generation_limit_kw
 
@@ -72,13 +79,18 @@ class PV:
 
 class BESS:
     def __init__(self, id, bus, e_cap_kwh, p_charge_max_kw, p_discharge_max_kw, s_max_kva, reactive_control, q_loss_rated_kw,
-                 eta_charge, eta_discharge, soc_init_frac, soc_min_frac, soc_max_frac, cyclic_soc):
+                 eta_charge, eta_discharge, soc_init_frac, soc_min_frac, soc_max_frac, cyclic_soc,
+                 phases=None, connection="wye", dispatch_mode="aggregate",
+                 soc_terminal_frac=None):
         self.id, self.bus, self.e_cap_kwh = id, bus, e_cap_kwh
         self.p_charge_max_kw, self.p_discharge_max_kw = p_charge_max_kw, p_discharge_max_kw
         self.s_max_kva, self.reactive_control, self.q_loss_rated_kw = s_max_kva, reactive_control, q_loss_rated_kw
         self.eta_charge, self.eta_discharge = eta_charge, eta_discharge
         self.soc_init_frac, self.soc_min_frac, self.soc_max_frac = soc_init_frac, soc_min_frac, soc_max_frac
         self.cyclic_soc = cyclic_soc
+        self.phases = tuple(phases or ())
+        self.connection, self.dispatch_mode = connection, dispatch_mode
+        self.soc_terminal_frac = soc_terminal_frac
         self.soc = soc_init_frac 
         self.array_soc = []        
         self.array_kw = []              
@@ -164,3 +176,6 @@ class Results:
         self.costs = []
         self.voltages = None
         self.voltages_pu = None
+        self.phase_voltages = None
+        self.phase_voltages_pu = None
+        self.phase_angles_deg = None

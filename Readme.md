@@ -116,7 +116,9 @@ opendss_env/devices_control.py
 
 This file contains the control functions that determine the operating commands applied to the BESS and PV systems.
 
-The current implementation uses predefined time-series commands.
+When `step(None)` is used, the environment falls back to predefined time-series
+commands. `step(action)` accepts named commands supplied by an external
+controller.
 
 ## BESS control
 
@@ -147,7 +149,8 @@ The `operate()` method receives the requested powers and applies the device oper
 
 Therefore, the command requested by the controller may be adjusted by the BESS model to keep the device within its feasible operating range.
 
-The current implementation already supports active and reactive BESS commands, but these commands are fixed time-series values.
+The current implementation supports active and reactive BESS commands from
+either the baseline profiles or `step(action)`.
 
 ## PV control
 
@@ -180,11 +183,10 @@ pv.operate(
 
 The `operate()` method applies the PV operating constraints before the resulting operating point is sent to OpenDSS.
 
-## Future device control
+## External device control
 
-The current predefined control is intended as a baseline for the environment.
-
-Future versions will allow an external controller or machine learning agent to determine the device actions at each time step.
+The predefined control remains a baseline. An external controller or machine
+learning agent can provide named device actions at each time step.
 
 The intended action space includes:
 
@@ -194,10 +196,27 @@ BESS:
     Q_BESS
 
 PV:
+    P_PV
     Q_PV
 ```
 
-This will allow the environment to move from a fixed-control simulation to an interactive control environment in which an agent receives the current state and selects the operating action.
+The action passed to `step()` uses the following structure:
+
+```python
+{
+    "bess": {
+        "b1": {"p_net_kw": ..., "q_injection_kvar": ...},
+    },
+    "pv": {
+        "pv1": {"generation_kw": ..., "q_injection_kvar": ...},
+    },
+}
+```
+
+Power values may be aggregate scalars or dictionaries indexed by phase. The
+`info` returned by `step()` includes both `requested_action` and
+`executed_action` after device limits, plus `bus_voltages_pu`,
+`bus_angles_deg`, and grid exchange for the solved snapshot.
 
 The control flow will then become:
 
@@ -274,7 +293,9 @@ At each `step(action)`, the environment:
 
 An episode terminates when the number of simulated steps reaches `EPISODE_STEPS`.
 
-Currently, `action` is not used to determine device operation because BESS and PV commands are predefined in `devices_control.py`. Future versions will use `action` to provide dynamic device control.
+When `action` is provided, it determines BESS and PV operation. With
+`action=None`, the predefined profiles in `devices_control.py` are used as the
+baseline.
 
 ## States
 
