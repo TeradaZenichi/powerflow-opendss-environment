@@ -1,5 +1,5 @@
 from pathlib import Path
-from opendss_env import MicrogridEnv
+from opendss_env import EnvironmentConfig, MicrogridEnv
 from opendss_env.states import get_hour,get_price,get_previous_pv_kw,get_bess_soc,get_previous_load_kw,get_current_load_kw
 from opendss_env.rewards import minimize_cost, minimize_voltage_deviation
 from opendss_env.results_scripts.results import simulation_results
@@ -13,21 +13,22 @@ if __name__ == "__main__":
     NUM_EPISODES = 1
     START_EPISODE = 0
 
-    env = MicrogridEnv(
+    config = EnvironmentConfig(
         case_path=CASE_PATH,
         episode_steps=EPISODE_STEPS,
-        num_episodes=NUM_EPISODES,
-        start_episode=START_EPISODE,
-        state_functions=[ # What the agent observes
+        state_functions=(
             get_hour,
             get_price,
             get_previous_pv_kw,
             get_bess_soc,
             get_previous_load_kw,
-            get_current_load_kw
-        ],
+            get_current_load_kw,
+        ),
+        num_episodes=NUM_EPISODES,
+        start_episode=START_EPISODE,
         reward_function=minimize_cost,
     )
+    env = MicrogridEnv(config)
 
     episode_rewards = []
 

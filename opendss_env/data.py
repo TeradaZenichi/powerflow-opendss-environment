@@ -4,11 +4,17 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from .case_source import resolve_case_source, validate_case_config
-from .elements import BESS, PV, Load, Grid, Results
+from .elements import BESS, BESSConfig, Grid, Load, PV, PVConfig, Results
 
 
 _PHASE_DEMAND = re.compile(r"^P(.+)_([abcABC123])$")
 _PHASE_NODE = {"a": 1, "b": 2, "c": 3, "1": 1, "2": 2, "3": 3}
+_PHASE_NAME = {"1": "a", "2": "b", "3": "c"}
+
+
+def _normalize_phase(value):
+    text = str(value).lower()
+    return _PHASE_NAME.get(text, text)
 
 
 def load_data(path):
@@ -68,7 +74,7 @@ def load_data(path):
             phase_frame = pd.read_csv(
                 path / phase_file, parse_dates=["timestamp"]
             ).sort_values("timestamp").reset_index(drop=True)
-            phase_profiles[str(phase).lower()] = phase_frame[phase_col].to_numpy()
+            phase_profiles[_normalize_phase(phase)] = phase_frame[phase_col].to_numpy()
             profile_timestamps.append(
                 (f"PV phase profile {phase_file}:{phase_col}", phase_frame["timestamp"])
             )
@@ -131,7 +137,7 @@ def episode_data(data, episode_idx, episode_steps):
         )
     
     # bess
-    bess_list = [BESS(**bess_data) for bess_data in data["devices"].get("bess", [])]
+    bess_list = [BESS(BESSConfig(**values)) for values in data["devices"].get("bess", [])]
 
     # grid
     grid = Grid(data["prices"][episode_start:episode_end])
@@ -143,12 +149,12 @@ def episode_data(data, episode_idx, episode_steps):
         profile = data["pv_profiles"][profile_id]
         episode_profile = profile[episode_start:episode_end]
 
-        pv = PV(**pv_data)
-        pv.profile = episode_profile
-        pv.phase_profiles = {
+        phase_profiles = {
             phase: values[episode_start:episode_end]
-            for phase, values in data["pv_phase_profiles"].get(pv.id, {}).items()
+            for phase, values in data["pv_phase_profiles"].get(str(pv_data["id"]), {}).items()
         }
+        config = {**pv_data, "profile": episode_profile, "phase_profiles": phase_profiles}
+        pv = PV(PVConfig(**config))
         pv_list.append(pv)
 
     # load
@@ -156,25 +162,28 @@ def episode_data(data, episode_idx, episode_steps):
     load_list = []
 
     for col in data["demand"].columns:
-        if col.startswith("Pbus_"):
-            phase_match = _PHASE_DEMAND.fullmatch(col)
-            if phase_match:
-                bus, phase = phase_match.groups()
-                phase_node = _PHASE_NODE[phase.lower()]
-                q_col = f"Q{bus}_{phase}"
-            else:
-                bus = col[1:]
-                phase, phase_node = None, None
-                q_col = f"Q{bus}"
-            load_list.append(
-                Load(
-                    id=f"Load_{bus}" + (f"_{phase.lower()}" if phase else ""),
-                    bus=bus,
-                    array_kw=data["demand"][col].to_numpy()[episode_start:episode_end],
-                    array_kvar=data["demand"][q_col].to_numpy()[episode_start:episode_end],
-                    phase_node=phase_node,
-                )
+        if not col.startswith("P"):
+            continue
+        phase_match = _PHASE_DEMAND.fullmatch(col)
+        if phase_match:
+            bus, phase = phase_match.groups()
+            phase_node = _PHASE_NODE[phase.lower()]
+            q_col = f"Q{bus}_{phase}"
+        else:
+            bus = col[1:]
+            phase, phase_node = None, None
+            q_col = f"Q{bus}"
+        if q_col not in data["demand"]:
+            raise ValueError(f"demand.csv is missing reactive column {q_col!r}")
+        load_list.append(
+            Load(
+                id=f"Load_{bus}" + (f"_{phase.lower()}" if phase else ""),
+                bus=bus,
+                array_kw=data["demand"][col].to_numpy()[episode_start:episode_end],
+                array_kvar=data["demand"][q_col].to_numpy()[episode_start:episode_end],
+                phase_node=phase_node,
             )
+        )
 
     return {
         "dt": data["dt"],
@@ -211,7 +220,31 @@ def _require_timestamps(actual, expected, label):
 def _validate_device_modes(devices):
     for kind in ("bess", "pv"):
         for device in devices.get(kind, []):
-            if str(device.get("connection", "wye")).lower() != "wye":
-                raise ValueError("The environment currently supports wye-connected devices")
-            if str(device.get("dispatch_mode", "aggregate")).lower() != "aggregate":
-                raise ValueError("The environment currently supports aggregate device dispatch")
+            connection = str(device.get("connection", "wye")).lower()
+            if connection not in {"wye", "delta"}:
+                raise ValueError("connection must be 'wye' or 'delta'")
+            if connection == "delta" and {
+                _normalize_phase(phase) for phase in device.get("phases", ())
+            } != {"a", "b", "c"}:
+                raise ValueError("delta devices must define phases a, b and c")
+            if str(device.get("dispatch_mode", "aggregate")).lower() not in {
+                "aggregate", "per_phase"
+            }:
+                raise ValueError("dispatch_mode must be 'aggregate' or 'per_phase'")
+            if (
+                kind == "pv"
+                and str(device.get("dispatch_mode", "aggregate")).lower()
+                == "per_phase"
+            ):
+                phases = {
+                    _normalize_phase(phase)
+                    for phase in device.get("phases", ("a", "b", "c"))
+                }
+                profiles = {
+                    _normalize_phase(phase)
+                    for phase in device.get("phase_profiles", {})
+                }
+                if profiles != phases:
+                    raise ValueError(
+                        "per_phase PV phase_profiles must define exactly its phases"
+                    )

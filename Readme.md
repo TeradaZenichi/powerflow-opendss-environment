@@ -17,30 +17,33 @@ python -m pip install -e path\to\powerflow-opendss-environment
 The main simulation is configured in `main_env.py`. The main runtime options are defined at the top of the file:
 
 ```Python
+from opendss_env import EnvironmentConfig, MicrogridEnv
+
 CASE_PATH = project_dir / "examples" / "case5"
 
 EPISODE_STEPS = 24
 NUM_EPISODES = 1
 START_EPISODE = 0
 
-env = MicrogridEnv(
+config = EnvironmentConfig(
     case_path=CASE_PATH,
     episode_steps=EPISODE_STEPS,
-    num_episodes=NUM_EPISODES,
-    start_episode=START_EPISODE,
-    state_functions=[
+    state_functions=(
         get_hour,
         get_price,
         get_previous_pv_kw,
         get_bess_soc,
         get_previous_load_kw,
-        get_current_load_kw
-    ],
+        get_current_load_kw,
+    ),
+    num_episodes=NUM_EPISODES,
+    start_episode=START_EPISODE,
     reward_function=minimize_cost,
 )
+env = MicrogridEnv(config)
 ```
 
-The main parameters are:
+The main configuration fields are:
 
 * `CASE_PATH`: path to the simulation case;
 * `EPISODE_STEPS`: number of time steps in each episode;
@@ -100,7 +103,8 @@ modules currently use `"schema_version": 1`.
 
 ```python
 case_source = "scenarios/network_01/config.json"  # directory also accepted
-env = MicrogridEnv(case_path=case_source, ...)
+config = EnvironmentConfig(case_source, episode_steps, state_functions)
+env = MicrogridEnv(config)
 ```
 
 The case data is loaded by `data.py`. The data loader also divides the available time series into episodes according to the parameters provided to the environment.
@@ -201,6 +205,16 @@ pv.operate(
 
 The `operate()` method applies the PV operating constraints before the resulting operating point is sent to OpenDSS.
 
+When `control` is `volt-var`, `volt-watt`, or `volt-var-watt`, the
+environment evaluates the same local curves used by the three-phase teacher.
+It iterates the PV command and OpenDSS power flow until the voltage-dependent
+command converges. The final command is reported in `executed_action`.
+
+Device and load nominal voltages are obtained from the connected OpenDSS bus.
+This preserves operation behind transformers and across multiple voltage
+levels; the configured system base is retained for the balanced single-phase
+equivalent.
+
 ## External device control
 
 The predefined control remains a baseline. An external controller or machine
@@ -242,6 +256,13 @@ charging and `q_injection_kvar > 0` for reactive injection. PV uses positive
 `generation_kw` and positive `q_injection_kvar` for injection. This makes the
 requested, device-limited, and electrically measured operation independently
 comparable.
+
+Set `dispatch_mode` to `aggregate` for balanced device operation or
+`per_phase` to create one OpenDSS element per phase. Both `wye` and three-phase
+`delta` devices are supported. For delta devices, keys `a`, `b`, and `c`
+identify the `a-c`, `b-a`, and `c-b` legs; voltage-dependent controls use the
+corresponding line-to-line voltage. The BESS keeps one shared SoC and aggregate
+charge/discharge limits in either dispatch mode.
 
 `env.observe()` returns a named pre-action observation with
 `observation_schema_version`, `timestamp`,
@@ -426,10 +447,8 @@ This reward penalizes deviations of the bus voltage magnitudes from 1.0 pu.
 The reward function is passed directly to the environment:
 
 ```python
-env = MicrogridEnv(
-    ...,
-    reward_function=minimize_cost,
-)
+config = EnvironmentConfig(case_path, episode_steps, state_functions, reward_function=minimize_cost)
+env = MicrogridEnv(config)
 ```
 
 This structure allows additional objectives or reward functions to be added independently of the environment implementation.

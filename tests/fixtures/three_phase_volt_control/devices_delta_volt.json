@@ -1,0 +1,24 @@
+{
+  "pv": [
+    {
+      "id": "pv1",
+      "bus": "load",
+      "phases": ["a", "b", "c"],
+      "connection": "delta",
+      "dispatch_mode": "per_phase",
+      "p_max_kw": 30.0,
+      "s_max_kva": 50.0,
+      "q_loss_rated_kw": 0.0,
+      "night_var": false,
+      "profile": "pv.csv:PV",
+      "phase_profiles": {
+        "a": "pv.csv:PV_a",
+        "b": "pv.csv:PV_b",
+        "c": "pv.csv:PV_c"
+      },
+      "control": "volt-var-watt",
+      "curtailable": true,
+      "power_factor": 1.0
+    }
+  ]
+}

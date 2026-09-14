@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import gymnasium as gym
 import numpy as np
 
@@ -13,20 +15,32 @@ from .simulation import (
 )
 
 
+@dataclass(frozen=True)
+class EnvironmentConfig:
+    case_path: object
+    episode_steps: int
+    state_functions: tuple
+    num_episodes: int = 1
+    start_episode: int = 0
+    reward_function: object = minimize_cost
+
+
 class MicrogridEnv(gym.Env):
 
-    def __init__(self, case_path, episode_steps, num_episodes, start_episode, state_functions, reward_function=minimize_cost):
+    def __init__(self, config):
         super().__init__()
+        if not isinstance(config, EnvironmentConfig):
+            raise TypeError("MicrogridEnv requires an EnvironmentConfig")
 
-        self.case_path = case_path
-        self.episode_steps = episode_steps
-        self.start_episode = start_episode
-        self.num_episodes = num_episodes
-        self.state_functions = state_functions
-        self.reward_function = reward_function
-        self.end_episode = start_episode + num_episodes
+        self.case_path = config.case_path
+        self.episode_steps = config.episode_steps
+        self.start_episode = config.start_episode
+        self.num_episodes = config.num_episodes
+        self.state_functions = tuple(config.state_functions)
+        self.reward_function = config.reward_function
+        self.end_episode = config.start_episode + config.num_episodes
 
-        self.data = load_data(case_path)
+        self.data = load_data(config.case_path)
         self.case_path = self.data["case_path"]
         self.config_path = self.data["config_path"]
 
@@ -82,7 +96,7 @@ class MicrogridEnv(gym.Env):
     def step(self, action=None):
         observation = self.observe()
         applied_action = _update_snapshot_powers(self, action)
-        grid_kw, grid_kvar, cost = solve_power_flow(self)
+        grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
 
         self.current_cost = cost
         reward = self.reward_function(self)

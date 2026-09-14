@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "name": "three-phase-volt-control",
+  "formulation": "three_phase_ivr",
+  "files": {
+    "demand": "demand.csv",
+    "prices": "price.csv",
+    "devices": "devices.json"
+  },
+  "base": {"s_base_kva": 100.0, "v_base_kv": 0.4},
+  "network": {"master": "dss/Master.dss", "slack_bus": "source"},
+  "grid": {
+    "bus": "source",
+    "v_ref_pu": {"a": 1.1, "b": 1.1, "c": 1.1},
+    "angle_ref_deg": {"a": 0.0, "b": -120.0, "c": 120.0},
+    "p_import_max_kw": 100.0,
+    "p_export_max_kw": 100.0,
+    "q_max_kvar": 100.0,
+    "feed_in_tariff_ratio": 1.0
+  },
+  "voltage_limits": {"v_min_pu": 0.9, "v_max_pu": 1.15}
+}

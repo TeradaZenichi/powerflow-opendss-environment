@@ -22,8 +22,8 @@ from opendss_env.devices_control import (
     bess_control,
     pv_control,
 )
-from opendss_env.elements import BESS
-from opendss_env.microgrid_env import MicrogridEnv
+from opendss_env.elements import BESS, PV, BESSConfig, PVConfig, PVRequest
+from opendss_env.microgrid_env import EnvironmentConfig, MicrogridEnv
 from opendss_env.simulation import (
     _update_snapshot_powers,
     collect_device_measurements,
@@ -32,6 +32,10 @@ from opendss_env.states import get_bess_soc
 
 
 CASE_PATH = Path(__file__).resolve().parents[1] / "examples" / "case5"
+VOLT_CONTROL_CASE = Path(__file__).resolve().parent / "fixtures" / "three_phase_volt_control"
+PER_PHASE_CASE = VOLT_CONTROL_CASE / "config_per_phase.json"
+DELTA_CASE = VOLT_CONTROL_CASE / "config_delta.json"
+DELTA_VOLT_CASE = VOLT_CONTROL_CASE / "config_delta_volt.json"
 
 
 class _FakeDSS:
@@ -80,15 +84,19 @@ class ReactiveOperationTest(unittest.TestCase):
         data, episode = self.episode()
         return SimpleNamespace(data=data, dss=_FakeDSS(), idx=0, **episode)
 
+    def environment(self, case=CASE_PATH, steps=24):
+        config = EnvironmentConfig(case, steps, (get_bess_soc,))
+        return MicrogridEnv(config)
+
     def test_bess_applies_capability_and_reactive_loss(self):
-        bess = BESS(
+        bess = BESS(BESSConfig(
             id="b1", bus="bus_004", e_cap_kwh=100.0,
             p_charge_max_kw=40.0, p_discharge_max_kw=40.0,
             s_max_kva=50.0, reactive_control=True,
             q_loss_rated_kw=0.5, eta_charge=0.95,
             eta_discharge=0.95, soc_init_frac=0.5,
             soc_min_frac=0.1, soc_max_frac=1.0, cyclic_soc=True,
-        )
+        ))
 
         p_bess, q_bess = bess.operate(40.0, 40.0, 1.0)
 
@@ -131,6 +139,57 @@ class ReactiveOperationTest(unittest.TestCase):
                 pv.profile,
             )
         ))
+
+    def test_pv_applies_volt_var_and_volt_watt_curves(self):
+        common = {
+            "id": "pv1",
+            "bus": "bus_005",
+            "p_max_kw": 100.0,
+            "s_max_kva": 100.0,
+            "q_loss_rated_kw": 0.0,
+            "night_var": False,
+            "profile": [100.0],
+            "curtailable": True,
+            "power_factor": 1.0,
+        }
+        volt_var = PV(PVConfig(control="volt-var", **common))
+        volt_watt = PV(PVConfig(control="volt-watt", **common))
+
+        _, q_injection = volt_var.apply(PVRequest(100.0, available_kw=100.0, voltage_pu=0.95))
+        generation, _ = volt_watt.apply(PVRequest(100.0, available_kw=100.0, voltage_pu=1.10))
+
+        self.assertGreater(q_injection, 0.0)
+        self.assertAlmostEqual(generation, 0.0)
+
+    def test_three_phase_voltage_control_converges_with_opendss(self):
+        env = self.environment(VOLT_CONTROL_CASE, 2)
+        env.reset()
+        action = {
+            "bess": {},
+            "pv": {
+                "pv1": {
+                    "generation_kw": {"a": 10.0, "b": 10.0, "c": 10.0},
+                    "q_injection_kvar": {"a": 0.0, "b": 0.0, "c": 0.0},
+                }
+            },
+        }
+
+        _, _, _, _, info = env.step(action)
+        executed = info["executed_action"]["pv"]["pv1"]
+        measured = info["device_measurements"]["pv"]["pv1"]
+
+        self.assertLess(executed["generation_total_kw"], 30.0)
+        self.assertLess(executed["q_injection_total_kvar"], 0.0)
+        self.assertAlmostEqual(
+            measured["generation_total_kw"],
+            executed["generation_total_kw"],
+            places=4,
+        )
+        self.assertAlmostEqual(
+            measured["q_injection_total_kvar"],
+            executed["q_injection_total_kvar"],
+            places=4,
+        )
 
     def test_bess_q_sign_is_converted_only_at_opendss_boundary(self):
         env = self.fake_env()
@@ -181,13 +240,7 @@ class ReactiveOperationTest(unittest.TestCase):
         )
 
     def test_step_reports_actual_terminal_powers(self):
-        env = MicrogridEnv(
-            CASE_PATH,
-            episode_steps=24,
-            num_episodes=1,
-            start_episode=0,
-            state_functions=[get_bess_soc],
-        )
+        env = self.environment()
         env.reset()
         action = {
             "bess": {
@@ -210,13 +263,7 @@ class ReactiveOperationTest(unittest.TestCase):
 
     def test_named_observation_is_pre_action_and_advances_causally(self):
         working_directory = Path.cwd()
-        env = MicrogridEnv(
-            CASE_PATH,
-            episode_steps=24,
-            num_episodes=1,
-            start_episode=0,
-            state_functions=[get_bess_soc],
-        )
+        env = self.environment()
         _, reset_info = env.reset()
         self.assertEqual(Path.cwd(), working_directory)
         before = reset_info["observation"]
@@ -278,24 +325,124 @@ class ReactiveOperationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "schema_version"):
             validate_case_config({"schema_version": 2})
 
-    def test_unsupported_device_modes_are_rejected_instead_of_aggregated(self):
-        with self.assertRaisesRegex(ValueError, "aggregate"):
+    def test_per_phase_and_delta_are_explicitly_validated(self):
+        _validate_device_modes({
+            "bess": [{"id": "b1", "dispatch_mode": "per_phase"}]
+        })
+        _validate_device_modes({
+            "pv": [{
+                "id": "pv1",
+                "connection": "delta",
+                "phases": ["a", "b", "c"],
+            }]
+        })
+        with self.assertRaisesRegex(ValueError, "connection"):
             _validate_device_modes({
-                "bess": [{"id": "b1", "dispatch_mode": "per_phase"}]
-            })
-        with self.assertRaisesRegex(ValueError, "wye"):
-            _validate_device_modes({
-                "pv": [{"id": "pv1", "connection": "delta"}]
+                "pv": [{"id": "pv1", "connection": "zigzag"}]
             })
 
+    def test_per_phase_pv_and_bess_are_applied_to_separate_elements(self):
+        env = self.environment(PER_PHASE_CASE, 2)
+        env.reset()
+        action = {
+            "bess": {
+                "b1": {
+                    "p_net_kw": {"a": 1.0, "b": 2.0, "c": 3.0},
+                    "q_injection_kvar": {"a": 1.0, "b": -1.0, "c": 0.0},
+                }
+            },
+            "pv": {
+                "pv1": {
+                    "generation_kw": {"a": 1.0, "b": 2.0, "c": 3.0},
+                    "q_injection_kvar": {"a": 0.5, "b": -0.5, "c": 0.0},
+                }
+            },
+        }
+
+        _, _, _, _, info = env.step(action)
+        executed_bess = info["executed_action"]["bess"]["b1"]
+        executed_pv = info["executed_action"]["pv"]["pv1"]
+        measured_bess = info["device_measurements"]["bess"]["b1"]
+        measured_pv = info["device_measurements"]["pv"]["pv1"]
+
+        self.assertEqual(executed_bess["p_net_kw"], action["bess"]["b1"]["p_net_kw"])
+        self.assertEqual(executed_pv["generation_kw"], action["pv"]["pv1"]["generation_kw"])
+        for phase in ("a", "b", "c"):
+            self.assertAlmostEqual(
+                measured_bess["p_net_kw"][phase],
+                executed_bess["p_net_kw"][phase],
+                places=5,
+            )
+            self.assertAlmostEqual(
+                measured_pv["generation_kw"][phase],
+                executed_pv["generation_kw"][phase],
+                places=5,
+            )
+        self.assertAlmostEqual(executed_bess["soc_after_frac"], 0.56)
+
+    def test_delta_per_phase_devices_use_line_to_line_elements(self):
+        env = self.environment(DELTA_CASE, 2)
+        env.reset()
+        action = {
+            "bess": {
+                "b1": {
+                    "p_net_kw": {"a": 1.0, "b": 2.0, "c": 3.0},
+                    "q_injection_kvar": {"a": 1.0, "b": -1.0, "c": 0.0},
+                }
+            },
+            "pv": {
+                "pv1": {
+                    "generation_kw": {"a": 1.0, "b": 2.0, "c": 3.0},
+                    "q_injection_kvar": {"a": 0.5, "b": -0.5, "c": 0.0},
+                }
+            },
+        }
+
+        _, _, _, _, info = env.step(action)
+        for kind, device_id, field in (
+            ("bess", "b1", "p_net_kw"),
+            ("pv", "pv1", "generation_kw"),
+        ):
+            requested = action[kind][device_id][field]
+            measured = info["device_measurements"][kind][device_id][field]
+            for phase in ("a", "b", "c"):
+                self.assertAlmostEqual(
+                    measured[phase], requested[phase], places=5
+                )
+
+    def test_delta_volt_var_watt_uses_each_line_to_line_voltage(self):
+        env = self.environment(DELTA_VOLT_CASE, 2)
+        env.reset()
+        action = {
+            "bess": {},
+            "pv": {
+                "pv1": {
+                    "generation_kw": {"a": 10.0, "b": 10.0, "c": 10.0},
+                    "q_injection_kvar": {"a": 0.0, "b": 0.0, "c": 0.0},
+                }
+            },
+        }
+
+        _, _, _, _, info = env.step(action)
+        executed = info["executed_action"]["pv"]["pv1"]
+        measured = info["device_measurements"]["pv"]["pv1"]
+
+        self.assertLess(executed["generation_total_kw"], 30.0)
+        self.assertLess(executed["q_injection_total_kvar"], 0.0)
+        for phase in ("a", "b", "c"):
+            self.assertAlmostEqual(
+                measured["generation_kw"][phase],
+                executed["generation_kw"][phase],
+                places=4,
+            )
+            self.assertAlmostEqual(
+                measured["q_injection_kvar"][phase],
+                executed["q_injection_kvar"][phase],
+                places=4,
+            )
+
     def test_actual_measurements_cover_charge_absorption_and_pv_curtailment(self):
-        env = MicrogridEnv(
-            CASE_PATH,
-            episode_steps=24,
-            num_episodes=1,
-            start_episode=0,
-            state_functions=[get_bess_soc],
-        )
+        env = self.environment()
         env.reset()
         idle = {
             "bess": {

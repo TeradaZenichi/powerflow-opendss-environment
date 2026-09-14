@@ -1,4 +1,4 @@
 from .contracts import OBSERVATION_SCHEMA_VERSION
-from .microgrid_env import MicrogridEnv
+from .microgrid_env import EnvironmentConfig, MicrogridEnv
 
-__all__ = ["MicrogridEnv", "OBSERVATION_SCHEMA_VERSION"]
+__all__ = ["EnvironmentConfig", "MicrogridEnv", "OBSERVATION_SCHEMA_VERSION"]
