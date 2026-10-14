@@ -133,6 +133,7 @@ New Line.Line_113_114 phases=3 bus1=bus_113.1.2.3 bus2=bus_114.1.2.3 LineCode=LC
 New Line.Line_115_035 phases=3 bus1=bus_115.1.2.3 bus2=bus_035.1.2.3 LineCode=LC4 Length=0.375 units=kft
 New Line.Line_117_052 phases=3 bus1=bus_117.1.2.3 bus2=bus_052.1.2.3 LineCode=LC1 Length=0.4 units=kft
 New Line.Line_118_067 phases=3 bus1=bus_118.1.2.3 bus2=bus_067.1.2.3 LineCode=LC6 Length=0.35 units=kft
+New Line.Line_118_123 phases=3 bus1=bus_118.1.2.3 bus2=bus_123.1.2.3 LineCode=LC6 Length=0.35 units=kft
 
 ! Normally closed switches represented as short Lines
 New Line.Line_013_117 phases=3 bus1=bus_013.1.2.3 bus2=bus_117.1.2.3 LineCode=LC1 Length=0.001 units=kft
