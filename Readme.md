@@ -291,10 +291,34 @@ charge/discharge limits in either dispatch mode.
 `observation_schema_version`, `timestamp`,
 `dt_h`, phase order, bus voltage/angle/load by phase, grid prices, BESS SoC and
 previous terminal powers, and PV availability and previous terminal powers.
-The same observation is returned in `reset()` info and as `info["observation"]`
-for the action applied by each `step()`. The original numeric state remains
-available through `state_functions` for backward compatibility. Temporal
-history is intentionally assembled by the training application.
+By default, this dictionary is the first value returned by both `reset()` and
+`step()`. `reset()` returns the initial observation; `step(action)` executes
+the action and returns the next pre-action observation. Its loads, prices,
+PV availability, voltage and SoC refer to the new timestamp. At episode end
+there is no next decision, so this value is `None` and `terminated` is true.
+
+`info["observation_before"]` records the observation used for the action just
+executed. The older `info["observation"]` key keeps the same pre-action meaning
+for compatibility. Other `info` measurements describe the executed snapshot.
+`reset()` also includes an independent copy under `info["observation"]`.
+Explicit `state_functions` preserve the original numeric state vector;
+`env.observe()` always returns the named physical dictionary. Temporal history
+is assembled by the training application.
+
+```python
+config = EnvironmentConfig(case_source, episode_steps=24)
+env = MicrogridEnv(config)
+observation, info = env.reset()
+# observation can be passed directly to Teacher.observe_dict().
+observation, reward, terminated, truncated, info = env.step(action)
+```
+
+The default observation uses voltage in pu, powers in kW/kvar, one SoC fraction
+per battery, and the original timestamp. `step()` accepts physical actions with
+the same names used by the teacher. Per-unit power conversion, time encoding,
+local/central feature selection and temporal windows stay explicit in the
+training application. A normalized NN action must be converted back to
+kW/kvar before calling `step()`.
 
 Each environment owns an independent OpenDSS context, so multiple environment
 instances can coexist in one process without sharing the active circuit.

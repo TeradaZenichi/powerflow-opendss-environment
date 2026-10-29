@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass
 
 import gymnasium as gym
@@ -19,7 +20,7 @@ from .simulation import (
 class EnvironmentConfig:
     case_path: object
     episode_steps: int
-    state_functions: tuple
+    state_functions: tuple = ()
     num_episodes: int = 1
     start_episode: int = 0
     reward_function: object = minimize_cost
@@ -91,9 +92,10 @@ class MicrogridEnv(gym.Env):
 
         prepare_pre_action_observation(self)
 
-        state = build_state(self, self.state_functions)
+        observation = self.observe()
+        state = build_state(self, self.state_functions) if self.state_functions else observation
 
-        return state, {"observation": self.observe()}
+        return state, {"observation": deepcopy(observation)}
 
     def step(self, action=None):
         observation = self.observe()
@@ -119,17 +121,18 @@ class MicrogridEnv(gym.Env):
             "grid_export_kw": max(grid_kw, 0.0),
             "bus_voltages_pu": self.current_bus_voltages_pu,
             "bus_angles_deg": self.current_bus_angles_deg,
-            "requested_action": action,
+            "requested_action": deepcopy(action),
             "executed_action": applied_action,
             "device_measurements": self.current_device_measurements,
-            "observation": observation,
+            "observation": observation,  # Compatibility key for the pre-action observation.
+            "observation_before": deepcopy(observation),
         }
 
         if terminated:
             state = None
         else:
             prepare_pre_action_observation(self)
-            state = build_state(self, self.state_functions)
+            state = build_state(self, self.state_functions) if self.state_functions else self.observe()
 
         return state, reward, terminated, truncated, info
 

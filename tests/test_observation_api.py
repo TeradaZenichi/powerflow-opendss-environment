@@ -1,0 +1,93 @@
+from copy import deepcopy
+import json
+from pathlib import Path
+import unittest
+
+import numpy as np
+
+from opendss_env import EnvironmentConfig, MicrogridEnv
+from opendss_env.states import get_bess_soc, get_hour
+
+
+CASE = Path(__file__).resolve().parents[1] / "examples" / "case5"
+
+
+class ObservationApiTest(unittest.TestCase):
+    def test_reset_returns_named_physical_observations_by_default(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        observation, info = env.reset()
+        self.assertIsInstance(observation, dict)
+        self.assertEqual(observation, env.observe())
+        self.assertEqual(observation, info["observation"])
+        self.assertEqual(observation["observation_schema_version"], 1)
+        self.assertEqual(observation["timestamp"], "2026-01-01T00:00:00")
+        self.assertAlmostEqual(sum(observation["buses"]["bus_002"]["p_load_kw"].values()), 100.0)
+        self.assertAlmostEqual(observation["bess"]["b1"]["soc_before_frac"], 0.5)
+        self.assertEqual(json.loads(json.dumps(observation)), observation)
+        observation["bess"]["b1"]["soc_before_frac"] = 0.1
+        observation["buses"]["bus_002"]["p_load_kw"]["a"] = 999.0
+        self.assertEqual(info["observation"]["bess"]["b1"]["soc_before_frac"], 0.5)
+        self.assertEqual(env.observe(), info["observation"])
+
+    def test_step_returns_the_next_observation_and_records_the_previous_one(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        before, _ = env.reset()
+        action = {
+            "bess": {"b1": {"p_net_kw": -10.0, "q_injection_kvar": 5.0}},
+            "pv": {"pv1": {"generation_kw": 0.0}},
+        }
+        requested = deepcopy(action)
+        after, _, terminated, truncated, info = env.step(action)
+        self.assertFalse(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(after, env.observe())
+        self.assertEqual(after["timestamp"], "2026-01-01T01:00:00")
+        self.assertEqual(info["observation_before"], before)
+        self.assertEqual(info["observation"], before)
+        self.assertEqual(info["timestamp"].isoformat(), before["timestamp"])
+        self.assertAlmostEqual(sum(after["buses"]["bus_002"]["p_load_kw"].values()), 90.0)
+        self.assertAlmostEqual(sum(after["bess"]["b1"]["previous_p_kw"].values()), -10.0, places=5)
+        self.assertEqual(after["bess"]["b1"]["soc_before_frac"], info["executed_action"]["bess"]["b1"]["soc_after_frac"])
+        self.assertEqual(len(env.bess_list[0].array_soc), 1)
+        self.assertEqual(len(env.results.costs), 1)
+        action["bess"]["b1"]["p_net_kw"] = 999.0
+        self.assertEqual(info["requested_action"], requested)
+        info["observation_before"]["bess"]["b1"]["soc_before_frac"] = 0.1
+        self.assertEqual(info["observation"], before)
+        after["bess"]["b1"]["soc_before_frac"] = 0.9
+        self.assertEqual(env.observe()["bess"]["b1"]["soc_before_frac"], env.bess_list[0].soc)
+
+    def test_final_step_has_no_next_decision_observation(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 1))
+        before, _ = env.reset()
+        observation, _, terminated, truncated, info = env.step()
+        self.assertIsNone(observation)
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info["observation_before"], before)
+        self.assertIn("bus_voltages_pu", info)
+        self.assertEqual(len(env.bess_list[0].array_soc), 1)
+        with self.assertRaises(RuntimeError):
+            env.step()
+        self.assertEqual(len(env.bess_list[0].array_soc), 1)
+        reset_observation, _ = env.reset()
+        self.assertEqual(reset_observation["timestamp"], before["timestamp"])
+        self.assertEqual(reset_observation["bess"]["b1"]["soc_before_frac"], 0.5)
+        self.assertEqual(env.bess_list[0].array_soc, [])
+
+    def test_explicit_state_functions_preserve_legacy_numeric_states(self):
+        config = EnvironmentConfig(CASE, 2, (get_hour, get_bess_soc))
+        env = MicrogridEnv(config)
+        state, reset_info = env.reset()
+        self.assertIsInstance(state, np.ndarray)
+        self.assertEqual(state.tolist(), [0.0, 0.5])
+        state, _, _, _, info = env.step()
+        self.assertIsInstance(state, np.ndarray)
+        self.assertEqual(state.shape, (2,))
+        self.assertEqual(float(state[0]), 1.0)
+        self.assertEqual(info["observation_before"], reset_info["observation"])
+        self.assertIsInstance(env.observe(), dict)
+
+
+if __name__ == "__main__":
+    unittest.main()
