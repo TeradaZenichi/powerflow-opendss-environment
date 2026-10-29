@@ -10,7 +10,7 @@ from .rewards import minimize_cost
 from .simulation import (
     _simulation_setup,
     _update_snapshot_powers,
-    initialize_pre_action_observation,
+    prepare_pre_action_observation,
     solve_power_flow,
 )
 
@@ -47,6 +47,7 @@ class MicrogridEnv(gym.Env):
         self.dss = OpenDSSDirectBackend()
         self.current_cost = 0.0
         self.current_device_measurements = {"bess": {}, "pv": {}}
+        self.previous_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
 
         self.load_episode_data(self.start_episode)
@@ -77,6 +78,7 @@ class MicrogridEnv(gym.Env):
         self.idx = 0
         self.current_cost = 0.0
         self.current_device_measurements = {"bess": {}, "pv": {}}
+        self.previous_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
 
         _simulation_setup(self)
@@ -87,7 +89,7 @@ class MicrogridEnv(gym.Env):
         self.results.phase_voltages_pu = {bus: {} for bus in self.dss.circuit.buses_names}
         self.results.phase_angles_deg = {bus: {} for bus in self.dss.circuit.buses_names}
 
-        initialize_pre_action_observation(self)
+        prepare_pre_action_observation(self)
 
         state = build_state(self, self.state_functions)
 
@@ -106,11 +108,7 @@ class MicrogridEnv(gym.Env):
         terminated = self.idx >= self.steps
         truncated = False
 
-        if terminated:
-            state = None
-        else:
-            state = build_state(self, self.state_functions)
-
+        self.previous_device_measurements = self.current_device_measurements
         info = {
             "timestamp": self.timestamps.iloc[self.idx - 1],
             "cost": cost,
@@ -126,6 +124,12 @@ class MicrogridEnv(gym.Env):
             "device_measurements": self.current_device_measurements,
             "observation": observation,
         }
+
+        if terminated:
+            state = None
+        else:
+            prepare_pre_action_observation(self)
+            state = build_state(self, self.state_functions)
 
         return state, reward, terminated, truncated, info
 

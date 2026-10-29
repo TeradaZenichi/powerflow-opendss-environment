@@ -126,6 +126,29 @@ After the solution, the environment records:
 * energy cost;
 * device operating quantities.
 
+### Observation timing and voltage units
+
+`reset()` solves the initial loads with idle BESS and PV devices. Before each
+subsequent action, the environment updates the loads and PV availability to the
+new timestamp and solves another snapshot with the last executed device
+setpoints. PV output is limited by the new availability and its inverter
+controls, including voltage-dependent controls. BESS power is held only for
+this instantaneous measurement; no energy is integrated.
+
+`observe()` returns these current pre-action voltages and angles, current loads,
+PV availability, prices, and SoC. The `previous_p_kw` and `previous_q_kvar` fields
+retain the measured powers from the last executed action. Repeated observations
+do not solve again or change the state. Only `step(action)` advances battery
+energy and records one cost and one set of results. Its `info` contains the
+post-action measurements for the step just executed.
+
+Voltages are phase-to-neutral magnitudes in per unit. Three-phase circuits use
+the OpenDSS voltage base of each bus. The single-phase equivalent uses the case's
+`base.v_base_kv` as its phase-to-neutral base, matching the device voltage setup.
+Device controls on delta connections use line-to-line voltage with the
+corresponding line-to-line base. Physical observations are not normalized for
+machine learning.
+
 ---
 
 # BESS and PV control

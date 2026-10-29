@@ -227,7 +227,7 @@ class ReactiveOperationTest(unittest.TestCase):
 
         executed = _update_snapshot_powers(env, action)
 
-        self.assertEqual(set(executed["bess"]["b1"]["p_net_kw"]), {"a"})
+        self.assertEqual(set(executed["bess"]["b1"]["p_net_kw"]), {"a", "b", "c"})
         self.assertAlmostEqual(
             sum(executed["bess"]["b1"]["p_net_kw"].values()), -20.0
         )
@@ -255,7 +255,7 @@ class ReactiveOperationTest(unittest.TestCase):
 
         bess = info["device_measurements"]["bess"]["b1"]
         pv = info["device_measurements"]["pv"]["pv1"]
-        self.assertEqual(set(bess["p_net_kw"]), {"a"})
+        self.assertEqual(set(bess["p_net_kw"]), {"a", "b", "c"})
         self.assertAlmostEqual(bess["p_net_total_kw"], -20.0, places=5)
         self.assertAlmostEqual(bess["q_injection_total_kvar"], 10.0, places=5)
         self.assertAlmostEqual(pv["generation_total_kw"], 0.0, places=5)
@@ -282,20 +282,20 @@ class ReactiveOperationTest(unittest.TestCase):
         self.assertEqual(info["observation"], before)
         self.assertEqual(before["timestamp"], "2026-01-01T00:00:00")
         self.assertEqual(after["timestamp"], "2026-01-01T01:00:00")
-        self.assertEqual(before["phase_order"], ["a"])
+        self.assertEqual(before["phase_order"], ["a", "b", "c"])
         self.assertAlmostEqual(before["bess"]["b1"]["soc_before_frac"], 0.5)
         self.assertAlmostEqual(
             after["bess"]["b1"]["soc_before_frac"],
             info["executed_action"]["bess"]["b1"]["soc_after_frac"],
         )
         self.assertAlmostEqual(
-            after["bess"]["b1"]["previous_p_kw"]["a"], -20.0, places=5
+            sum(after["bess"]["b1"]["previous_p_kw"].values()), -20.0, places=5
         )
         self.assertAlmostEqual(
-            after["bess"]["b1"]["previous_q_kvar"]["a"], 10.0, places=5
+            sum(after["bess"]["b1"]["previous_q_kvar"].values()), 10.0, places=5
         )
         self.assertAlmostEqual(
-            before["buses"]["bus_002"]["p_load_kw"]["a"], 100.0
+            sum(before["buses"]["bus_002"]["p_load_kw"].values()), 100.0
         )
         self.assertGreater(
             before["buses"]["bus_002"]["v_before_pu"]["a"], 0.0

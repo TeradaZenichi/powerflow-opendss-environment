@@ -1,6 +1,6 @@
 """OpenDSS simulation setup and execution."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import numpy as np
 from .devices_control import BESS_KVAR, BESS_KW, PV_KVAR, bess_control
 from .elements import PVPoint, PVRequest
@@ -228,28 +228,58 @@ def collect_bus_measurements(env):
                 continue
             phase = _PHASE_NAME[node]
             voltages[bus][phase] = float(voltage_values[2 * position])
-            voltages_pu[bus][phase] = float(pu_values[2 * position])
+            if env.data["phases"] == 1:
+                voltages_pu[bus][phase] = voltages[bus][phase] / (env.data["base_kv"] * 1000.0)
+            else:
+                voltages_pu[bus][phase] = float(pu_values[2 * position])
             angles_deg[bus][phase] = float(pu_values[2 * position + 1])
     return BusSnapshot(voltages, voltages_pu, angles_deg)
 
 
-def initialize_pre_action_observation(env):
-    """Solve the reset snapshot with current loads and idle controllable devices."""
-
+def _set_loads(env):
     for load in env.load_list:
         env.dss.text(
             f"Edit Load.{load.id} kw={load.array_kw[env.idx]} "
             f"kvar={load.array_kvar[env.idx]}"
         )
-    env.dss.text("Set Tolerance=1e-8")
-    env.dss.solution.solve()
-    if not env.dss.solution.converged:
-        raise RuntimeError("OpenDSS did not converge while initializing observation")
-    snapshot = collect_bus_measurements(env)
+
+
+def prepare_pre_action_observation(env):
+    """Measure current loads with held device setpoints, without integrating energy."""
+    _set_loads(env)
+    controls = []
+    previous = _current_snapshot(env)
+    if env.idx > 0:
+        for pv in env.pv_list:
+            phases = _device_phases(pv, env.data["phases"])
+            if pv.dispatch_mode == "aggregate":
+                requests = {None: PVRequest(
+                    pv.array_kw[-1], pv.array_kvar[-1], float(pv.profile[env.idx]),
+                    previous.device_average_pu(pv),
+                )}
+            else:
+                requests = {}
+                voltages = previous.device_pu(pv)
+                for phase in phases:
+                    point = pv._phase_points[phase]
+                    requests[phase] = PVRequest(
+                        point.generation_kw, point.q_injection_kvar,
+                        float(pv.phase_profiles[phase][env.idx]), voltages[phase],
+                        1.0 / len(phases),
+                    )
+            control = PVDispatch(DssDevice(env, pv, "Generator"), requests)
+            control.apply()
+            controls.append(control)
+
+    snapshot = _solve_snapshot(env, controls)
     env.current_bus_snapshot = snapshot
     env.current_bus_voltages_pu = snapshot.pu
     env.current_bus_angles_deg = snapshot.angles
+    env.current_voltages_pu = {
+        bus: next(iter(values.values())) for bus, values in snapshot.pu.items()
+    }
     env.current_device_measurements = collect_device_measurements(env)
+
 
 def _simulation_setup(env):
     """Create the OpenDSS circuit and its devices."""
@@ -283,9 +313,7 @@ def _simulation_setup(env):
 def _update_snapshot_powers(env, action=None):
     """Apply load and device powers for the current step."""
 
-    for load in env.load_list:
-        command = f"Edit Load.{load.id} kw={load.array_kw[env.idx]} kvar={load.array_kvar[env.idx]}"
-        env.dss.text(command)
+    _set_loads(env)
 
     applied = {"bess": {}, "pv": {}}
     snapshot = _current_snapshot(env)
@@ -422,98 +450,101 @@ def _update_snapshot_powers(env, action=None):
 
     return applied
 
-def solve_power_flow(env, applied_action=None):
-    """Solve the current snapshot and store its results."""
 
+@dataclass
+class PVDispatch:
+    element: DssDevice
+    requests: dict
+    points: dict = field(init=False)
+
+    def __post_init__(self):
+        self.points = {
+            phase: self.element.device.operating_point(request)
+            for phase, request in self.requests.items()
+        }
+
+    def apply(self):
+        for phase, point in self.points.items():
+            self.element.edit(point.p_net_kw, point.q_injection_kvar, phase)
+
+    def update_voltage(self, snapshot):
+        pv = self.element.device
+        if pv.control not in {"volt-var", "volt-watt", "volt-var-watt"}:
+            return False
+        changed = False
+        voltages = snapshot.device_pu(pv)
+        for phase, request in self.requests.items():
+            voltage = snapshot.device_average_pu(pv) if phase is None else voltages[phase]
+            point = pv.operating_point(replace(request, voltage_pu=voltage))
+            previous = self.points[phase]
+            if max(
+                abs(point.p_net_kw - previous.p_net_kw),
+                abs(point.q_injection_kvar - previous.q_injection_kvar),
+            ) > 1e-7:
+                changed = True
+                self.points[phase] = point
+                self.element.edit(point.p_net_kw, point.q_injection_kvar, phase)
+        return changed
+
+    def record(self, applied_action):
+        pv = self.element.device
+        point = PVPoint.total(self.points.values())
+        pv.array_kw[-1] = point.generation_kw
+        pv.array_kvar[-1] = point.q_injection_kvar
+        pv.array_p_net_kw[-1] = point.p_net_kw
+        pv.array_grid_consumption_kw[-1] = point.grid_consumption_kw
+        pv.array_inverter_loss_kw[-1] = point.inverter_loss_kw
+        if pv.dispatch_mode == "per_phase":
+            pv._phase_points = self.points
+        if applied_action is None:
+            return
+        if pv.dispatch_mode == "aggregate":
+            phases = self.element.phases
+            generation = _phase_result(point.generation_kw, phases, len(phases))
+            reactive = _phase_result(point.q_injection_kvar, phases, len(phases))
+        else:
+            generation = {phase: value.generation_kw for phase, value in self.points.items()}
+            reactive = {phase: value.q_injection_kvar for phase, value in self.points.items()}
+        available = sum(request.available_kw for request in self.requests.values())
+        applied_action["pv"][pv.id].update({
+            "generation_kw": generation,
+            "q_injection_kvar": reactive,
+            "generation_total_kw": point.generation_kw,
+            "p_injection_total_kw": point.p_net_kw,
+            "q_injection_total_kvar": point.q_injection_kvar,
+            "curtailment_kw": max(available - point.generation_kw - point.inverter_loss_kw, 0.0),
+            "inverter_loss_kw": point.inverter_loss_kw,
+        })
+
+
+def _solve_snapshot(env, controls):
+    """Converge electrical and PV controls without recording a time step."""
     env.dss.text("Set Tolerance=1e-8")
     for _ in range(50):
         env.dss.solution.solve()
         if not env.dss.solution.converged:
             raise RuntimeError(f"OpenDSS did not converge at timestep {env.idx}")
-        trial = collect_bus_measurements(env)
+        snapshot = collect_bus_measurements(env)
         changed = False
-        for pv in env.pv_list:
-            if pv.control not in {"volt-var", "volt-watt", "volt-var-watt"}:
-                continue
-            phases = _device_phases(pv, env.data["phases"])
-            element = DssDevice(env, pv, "Generator")
-            if pv.dispatch_mode == "aggregate":
-                voltage_pu = trial.device_average_pu(pv)
-                request = pv._control_request
-                control_available_kw = request.available_kw
-                point = pv.operating_point(replace(request, voltage_pu=voltage_pu))
-                previous_p = pv.array_p_net_kw[-1]
-                previous_q = pv.array_kvar[-1]
-                if max(
-                    abs(point.p_net_kw - previous_p),
-                    abs(point.q_injection_kvar - previous_q),
-                ) <= 1e-7:
-                    continue
-                changed = True
-                generation_by_phase = _phase_result(point.generation_kw, phases, len(phases))
-                q_by_phase = _phase_result(point.q_injection_kvar, phases, len(phases))
-                pv.array_kw[-1] = point.generation_kw
-                pv.array_kvar[-1] = point.q_injection_kvar
-                pv.array_p_net_kw[-1] = point.p_net_kw
-                pv.array_grid_consumption_kw[-1] = point.grid_consumption_kw
-                pv.array_inverter_loss_kw[-1] = point.inverter_loss_kw
-                element.edit(point.p_net_kw, point.q_injection_kvar)
-            else:
-                phase_points = {}
-                max_change = 0.0
-                for phase in phases:
-                    request = pv._phase_control_requests[phase]
-                    command = replace(request, voltage_pu=trial.device_pu(pv)[phase])
-                    phase_point = pv.operating_point(command)
-                    previous = pv._phase_points[phase]
-                    max_change = max(
-                        max_change,
-                        abs(phase_point.p_net_kw - previous.p_net_kw),
-                        abs(phase_point.q_injection_kvar - previous.q_injection_kvar),
-                    )
-                    phase_points[phase] = phase_point
-                if max_change <= 1e-7:
-                    continue
-                changed = True
-                pv._phase_points = phase_points
-                for phase, phase_point in phase_points.items():
-                    element.edit(phase_point.p_net_kw, phase_point.q_injection_kvar, phase)
-                generation_by_phase = {
-                    phase: phase_point.generation_kw
-                    for phase, phase_point in phase_points.items()
-                }
-                q_by_phase = {
-                    phase: phase_point.q_injection_kvar
-                    for phase, phase_point in phase_points.items()
-                }
-                point = PVPoint.total(phase_points.values())
-                control_available_kw = sum(request.available_kw for request in pv._phase_control_requests.values())
-                pv.array_kw[-1] = point.generation_kw
-                pv.array_kvar[-1] = point.q_injection_kvar
-                pv.array_p_net_kw[-1] = point.p_net_kw
-                pv.array_grid_consumption_kw[-1] = point.grid_consumption_kw
-                pv.array_inverter_loss_kw[-1] = point.inverter_loss_kw
-            if applied_action is not None:
-                applied_action["pv"][pv.id].update({
-                    "generation_kw": generation_by_phase,
-                    "q_injection_kvar": q_by_phase,
-                    "generation_total_kw": point.generation_kw,
-                    "p_injection_total_kw": point.p_net_kw,
-                    "q_injection_total_kvar": point.q_injection_kvar,
-                    "curtailment_kw": max(
-                        control_available_kw
-                        - point.generation_kw
-                        - point.inverter_loss_kw,
-                        0.0,
-                    ),
-                    "inverter_loss_kw": point.inverter_loss_kw,
-                })
+        for control in controls:
+            changed = control.update_voltage(snapshot) or changed
         if not changed:
-            break
-    else:
-        raise RuntimeError(f"PV voltage controls did not converge at timestep {env.idx}")
+            return snapshot
+    raise RuntimeError(f"PV voltage controls did not converge at timestep {env.idx}")
 
-    snapshot = collect_bus_measurements(env)
+
+def solve_power_flow(env, applied_action=None):
+    """Solve the executed action and record one time step."""
+    controls = []
+    for pv in env.pv_list:
+        if pv.dispatch_mode == "aggregate":
+            requests = {None: pv._control_request}
+        else:
+            requests = pv._phase_control_requests
+        controls.append(PVDispatch(DssDevice(env, pv, "Generator"), requests))
+    snapshot = _solve_snapshot(env, controls)
+    for control in controls:
+        control.record(applied_action)
     for bus in env.results.voltages:
         for phase, value in snapshot.volts[bus].items():
             env.results.phase_voltages[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = value

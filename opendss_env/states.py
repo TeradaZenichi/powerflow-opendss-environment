@@ -78,7 +78,7 @@ def build_named_observation(env):
     bess = {}
     for device in env.bess_list:
         phases = _phase_names(device, env.data["phases"])
-        measured = env.current_device_measurements["bess"].get(device.id, {})
+        measured = env.previous_device_measurements["bess"].get(device.id, {})
         bess[device.id] = {
             "soc_before_frac": float(device.soc),
             "previous_p_kw": _phase_values(measured.get("p_net_kw", {}), phases),
@@ -98,7 +98,7 @@ def build_named_observation(env):
         else:
             share = float(device.profile[env.idx]) / len(phases)
             available = {phase: share for phase in phases}
-        measured = env.current_device_measurements["pv"].get(device.id, {})
+        measured = env.previous_device_measurements["pv"].get(device.id, {})
         pv[device.id] = {
             "available_kw": available,
             "previous_p_kw": _phase_values(
