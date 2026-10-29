@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import gymnasium as gym
 import numpy as np
+from pu_normalizer import PUNormalizer
 
 from .backend import OpenDSSDirectBackend
 from .data import load_data, episode_data
@@ -44,6 +45,7 @@ class MicrogridEnv(gym.Env):
         self.data = load_data(config.case_path)
         self.case_path = self.data["case_path"]
         self.config_path = self.data["config_path"]
+        self.normalizer = PUNormalizer(self.data["base_kva"], self.data["base_kv"])
 
         self.dss = OpenDSSDirectBackend()
         self.current_cost = 0.0
@@ -99,7 +101,11 @@ class MicrogridEnv(gym.Env):
 
     def step(self, action=None):
         observation = self.observe()
-        applied_action = _update_snapshot_powers(self, action)
+        physical_action = None
+        if action is not None:
+            self.normalizer.require_pu(action)
+            physical_action = self.normalizer.denormalize(action)
+        applied_action = _update_snapshot_powers(self, physical_action)
         grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
 
         self.current_cost = cost
@@ -112,6 +118,8 @@ class MicrogridEnv(gym.Env):
 
         self.previous_device_measurements = self.current_device_measurements
         info = {
+            "units": "pu",
+            "base": self.normalizer.as_dict()["base"],
             "timestamp": self.timestamps.iloc[self.idx - 1],
             "cost": cost,
             "reward": reward,
@@ -134,6 +142,8 @@ class MicrogridEnv(gym.Env):
             prepare_pre_action_observation(self)
             state = build_state(self, self.state_functions) if self.state_functions else self.observe()
 
+        info = self.normalizer.normalize(info)
+        self.normalizer.require_pu(info)
         return state, reward, terminated, truncated, info
 
     def observe(self):

@@ -37,6 +37,7 @@ def load_data(path):
     prices = price_frame["price_per_kwh"].to_numpy()
 
     base_kv = cfg["base"]["v_base_kv"]
+    base_kva = cfg["base"]["s_base_kva"]
 
     # circuit and line data
     topology = path / cfg["network"]["master"]
@@ -112,6 +113,7 @@ def load_data(path):
         "steps": steps,
         "phases": phases,
         "base_kv": base_kv,
+        "base_kva": base_kva,
         "topology": topology,
         "devices": devices,
         "pv_profiles": pv_profiles,

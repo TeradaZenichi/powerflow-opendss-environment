@@ -1,4 +1,4 @@
 """Versioned public contracts shared with external integrations."""
 
 
-OBSERVATION_SCHEMA_VERSION = 1
+OBSERVATION_SCHEMA_VERSION = 2

@@ -13,19 +13,52 @@ CASE = Path(__file__).resolve().parents[1] / "examples" / "case5"
 
 
 class ObservationApiTest(unittest.TestCase):
-    def test_reset_returns_named_physical_observations_by_default(self):
+    def test_step_rejects_physical_or_nonfinite_actions_before_execution(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        before, _ = env.reset()
+        invalid = (
+            {"bess": {"b1": {"p_net_kw": -10.0}}},
+            {"bess": {"b1": {"p_net_pu": float("nan")}}},
+        )
+        for action in invalid:
+            with self.subTest(action=action), self.assertRaises(ValueError):
+                env.step(action)
+            self.assertEqual(env.observe(), before)
+            self.assertEqual(env.bess_list[0].array_soc, [])
+            self.assertEqual(env.results.costs, [])
+
+    def test_pu_results_can_be_converted_back_to_physical_units(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        observation, _ = env.reset()
+        self.assertEqual(observation["units"], "pu")
+        self.assertEqual(observation["base"], {"s_base_kva": 1000.0, "v_base_kv": 11.0})
+        action = {
+            "bess": {"b1": {"p_net_pu": -0.01, "q_injection_pu": 0.005}},
+            "pv": {"pv1": {"generation_pu": 0.0}},
+        }
+        _, _, _, _, info = env.step(action)
+        env.normalizer.require_pu(info)
+        self.assertEqual(info["units"], "pu")
+        self.assertAlmostEqual(info["device_measurements"]["bess"]["b1"]["p_net_total_pu"], -0.01)
+        physical = env.normalizer.denormalize(info)
+        self.assertEqual(physical["units"], "physical")
+        self.assertAlmostEqual(physical["device_measurements"]["bess"]["b1"]["p_net_total_kw"], -10.0, places=5)
+        self.assertEqual(physical["bus_voltages_pu"], info["bus_voltages_pu"])
+        self.assertEqual(physical["cost"], info["cost"])
+
+    def test_reset_returns_named_pu_observations_by_default(self):
         env = MicrogridEnv(EnvironmentConfig(CASE, 2))
         observation, info = env.reset()
         self.assertIsInstance(observation, dict)
         self.assertEqual(observation, env.observe())
         self.assertEqual(observation, info["observation"])
-        self.assertEqual(observation["observation_schema_version"], 1)
+        self.assertEqual(observation["observation_schema_version"], 2)
         self.assertEqual(observation["timestamp"], "2026-01-01T00:00:00")
-        self.assertAlmostEqual(sum(observation["buses"]["bus_002"]["p_load_kw"].values()), 100.0)
+        self.assertAlmostEqual(sum(observation["buses"]["bus_002"]["p_load_pu"].values()), 0.1)
         self.assertAlmostEqual(observation["bess"]["b1"]["soc_before_frac"], 0.5)
         self.assertEqual(json.loads(json.dumps(observation)), observation)
         observation["bess"]["b1"]["soc_before_frac"] = 0.1
-        observation["buses"]["bus_002"]["p_load_kw"]["a"] = 999.0
+        observation["buses"]["bus_002"]["p_load_pu"]["a"] = 999.0
         self.assertEqual(info["observation"]["bess"]["b1"]["soc_before_frac"], 0.5)
         self.assertEqual(env.observe(), info["observation"])
 
@@ -33,8 +66,8 @@ class ObservationApiTest(unittest.TestCase):
         env = MicrogridEnv(EnvironmentConfig(CASE, 2))
         before, _ = env.reset()
         action = {
-            "bess": {"b1": {"p_net_kw": -10.0, "q_injection_kvar": 5.0}},
-            "pv": {"pv1": {"generation_kw": 0.0}},
+            "bess": {"b1": {"p_net_pu": -0.01, "q_injection_pu": 0.005}},
+            "pv": {"pv1": {"generation_pu": 0.0}},
         }
         requested = deepcopy(action)
         after, _, terminated, truncated, info = env.step(action)
@@ -45,12 +78,12 @@ class ObservationApiTest(unittest.TestCase):
         self.assertEqual(info["observation_before"], before)
         self.assertEqual(info["observation"], before)
         self.assertEqual(info["timestamp"].isoformat(), before["timestamp"])
-        self.assertAlmostEqual(sum(after["buses"]["bus_002"]["p_load_kw"].values()), 90.0)
-        self.assertAlmostEqual(sum(after["bess"]["b1"]["previous_p_kw"].values()), -10.0, places=5)
+        self.assertAlmostEqual(sum(after["buses"]["bus_002"]["p_load_pu"].values()), 0.09)
+        self.assertAlmostEqual(sum(after["bess"]["b1"]["previous_p_pu"].values()), -0.01, places=5)
         self.assertEqual(after["bess"]["b1"]["soc_before_frac"], info["executed_action"]["bess"]["b1"]["soc_after_frac"])
         self.assertEqual(len(env.bess_list[0].array_soc), 1)
         self.assertEqual(len(env.results.costs), 1)
-        action["bess"]["b1"]["p_net_kw"] = 999.0
+        action["bess"]["b1"]["p_net_pu"] = 999.0
         self.assertEqual(info["requested_action"], requested)
         info["observation_before"]["bess"]["b1"]["soc_before_frac"] = 0.1
         self.assertEqual(info["observation"], before)

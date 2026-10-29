@@ -260,23 +260,25 @@ The action passed to `step()` uses the following structure:
 ```python
 {
     "bess": {
-        "b1": {"p_net_kw": ..., "q_injection_kvar": ...},
+        "b1": {"p_net_pu": ..., "q_injection_pu": ...},
     },
     "pv": {
-        "pv1": {"generation_kw": ..., "q_injection_kvar": ...},
+        "pv1": {"generation_pu": ..., "q_injection_pu": ...},
     },
 }
 ```
 
-Power values may be aggregate scalars or dictionaries indexed by phase. The
+Power values use pu and may be aggregate scalars or dictionaries indexed by
+phase. Each phase uses the total network `s_base_kva`, without dividing the
+base by three. Physical `_kw`/`_kvar` action fields are rejected. The
 `info` returned by `step()` includes both `requested_action` and
 `executed_action` after device limits, plus `bus_voltages_pu`,
 `bus_angles_deg`, and grid exchange for the solved snapshot.
 
 `info["device_measurements"]` contains the terminal powers read back from the
-solved OpenDSS circuit, by phase and in aggregate. BESS uses `p_net_kw > 0` for
-charging and `q_injection_kvar > 0` for reactive injection. PV uses positive
-`generation_kw` and positive `q_injection_kvar` for injection. This makes the
+solved OpenDSS circuit, in pu by phase and in aggregate. BESS uses `p_net_pu > 0`
+for charging and `q_injection_pu > 0` for reactive injection. PV uses positive
+`generation_pu` and positive `q_injection_pu` for injection. This makes the
 requested, device-limited, and electrically measured operation independently
 comparable.
 
@@ -288,7 +290,8 @@ corresponding line-to-line voltage. The BESS keeps one shared SoC and aggregate
 charge/discharge limits in either dispatch mode.
 
 `env.observe()` returns a named pre-action observation with
-`observation_schema_version`, `timestamp`,
+`observation_schema_version: 2`, `units: "pu"`, `base`,
+`phase_power_base: "total_network"`, `timestamp`,
 `dt_h`, phase order, bus voltage/angle/load by phase, grid prices, BESS SoC and
 previous terminal powers, and PV availability and previous terminal powers.
 By default, this dictionary is the first value returned by both `reset()` and
@@ -302,7 +305,7 @@ executed. The older `info["observation"]` key keeps the same pre-action meaning
 for compatibility. Other `info` measurements describe the executed snapshot.
 `reset()` also includes an independent copy under `info["observation"]`.
 Explicit `state_functions` preserve the original numeric state vector;
-`env.observe()` always returns the named physical dictionary. Temporal history
+`env.observe()` always returns the named pu dictionary. Temporal history
 is assembled by the training application.
 
 ```python
@@ -313,12 +316,26 @@ observation, info = env.reset()
 observation, reward, terminated, truncated, info = env.step(action)
 ```
 
-The default observation uses voltage in pu, powers in kW/kvar, one SoC fraction
-per battery, and the original timestamp. `step()` accepts physical actions with
-the same names used by the teacher. Per-unit power conversion, time encoding,
-local/central feature selection and temporal windows stay explicit in the
-training application. A normalized NN action must be converted back to
-kW/kvar before calling `step()`.
+Observations and step power measurements use pu, with one SoC fraction per
+battery and the original timestamp. `step()` accepts the pu actions returned
+by `Teacher.state_action()` or the NN directly. Time encoding, local/central
+feature selection and temporal windows belong to the training application.
+
+The environment and teacher share `PUNormalizer` from the standalone
+`pu-normalizer` package. `env.normalizer` uses `s_base_kva` and `v_base_kv`
+from the case configuration. It converts powers only at the OpenDSS boundary;
+voltages already in pu and SoC are preserved. Negative values and values above
+1 pu are preserved. The environment does not depend on the teacher or its solvers.
+
+For optional physical reports, convert a copy of the returned measurements:
+
+```python
+physical_info = env.normalizer.denormalize(info)
+# physical_info has _kw/_kvar fields; voltage remains in pu.
+```
+
+The internal device objects and `get_episode_results()` retain their physical
+units for the existing simulation reports.
 
 Each environment owns an independent OpenDSS context, so multiple environment
 instances can coexist in one process without sharing the active circuit.

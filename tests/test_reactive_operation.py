@@ -174,7 +174,8 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
 
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
+        info = env.normalizer.denormalize(info)
         executed = info["executed_action"]["pv"]["pv1"]
         measured = info["device_measurements"]["pv"]["pv1"]
 
@@ -251,7 +252,8 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
 
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
+        info = env.normalizer.denormalize(info)
 
         bess = info["device_measurements"]["bess"]["b1"]
         pv = info["device_measurements"]["pv"]["pv1"]
@@ -276,7 +278,7 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
 
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
         after = env.observe()
 
         self.assertEqual(info["observation"], before)
@@ -289,13 +291,13 @@ class ReactiveOperationTest(unittest.TestCase):
             info["executed_action"]["bess"]["b1"]["soc_after_frac"],
         )
         self.assertAlmostEqual(
-            sum(after["bess"]["b1"]["previous_p_kw"].values()), -20.0, places=5
+            sum(after["bess"]["b1"]["previous_p_pu"].values()), -0.02, places=5
         )
         self.assertAlmostEqual(
-            sum(after["bess"]["b1"]["previous_q_kvar"].values()), 10.0, places=5
+            sum(after["bess"]["b1"]["previous_q_pu"].values()), 0.01, places=5
         )
         self.assertAlmostEqual(
-            sum(before["buses"]["bus_002"]["p_load_kw"].values()), 100.0
+            sum(before["buses"]["bus_002"]["p_load_pu"].values()), 0.1
         )
         self.assertGreater(
             before["buses"]["bus_002"]["v_before_pu"]["a"], 0.0
@@ -359,7 +361,8 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
 
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
+        info = env.normalizer.denormalize(info)
         executed_bess = info["executed_action"]["bess"]["b1"]
         executed_pv = info["executed_action"]["pv"]["pv1"]
         measured_bess = info["device_measurements"]["bess"]["b1"]
@@ -398,7 +401,8 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
 
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
+        info = env.normalizer.denormalize(info)
         for kind, device_id, field in (
             ("bess", "b1", "p_net_kw"),
             ("pv", "pv1", "generation_kw"),
@@ -423,7 +427,8 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
 
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
+        info = env.normalizer.denormalize(info)
         executed = info["executed_action"]["pv"]["pv1"]
         measured = info["device_measurements"]["pv"]["pv1"]
 
@@ -453,7 +458,7 @@ class ReactiveOperationTest(unittest.TestCase):
             },
         }
         for _ in range(6):
-            env.step(idle)
+            env.step(env.normalizer.normalize(idle))
 
         action = {
             "bess": {
@@ -463,7 +468,8 @@ class ReactiveOperationTest(unittest.TestCase):
                 "pv1": {"generation_kw": 5.0, "q_injection_kvar": -2.0}
             },
         }
-        _, _, _, _, info = env.step(action)
+        _, _, _, _, info = env.step(env.normalizer.normalize(action))
+        info = env.normalizer.denormalize(info)
 
         executed_bess = info["executed_action"]["bess"]["b1"]
         executed_pv = info["executed_action"]["pv"]["pv1"]

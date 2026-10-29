@@ -42,7 +42,7 @@ def build_state(env, state_functions):
 
 
 def build_named_observation(env):
-    """Return the causal pre-action observation using named physical fields."""
+    """Return the causal pre-action observation in pu on the configured bases."""
 
     if env.idx >= env.steps:
         raise RuntimeError("No observation is available after the episode terminates")
@@ -110,8 +110,11 @@ def build_named_observation(env):
         }
 
     price = float(env.grid.prices[env.idx])
-    return {
+    observation = {
         "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
+        "units": "pu",
+        "base": env.normalizer.as_dict()["base"],
+        "phase_power_base": "total_network",
         "timestamp": env.timestamps.iloc[env.idx].isoformat(),
         "dt_h": float(env.dt),
         "phase_order": list(_PHASE_NAME.values())[:env.data["phases"]],
@@ -123,3 +126,4 @@ def build_named_observation(env):
         "bess": bess,
         "pv": pv,
     }
+    return env.normalizer.normalize(observation)

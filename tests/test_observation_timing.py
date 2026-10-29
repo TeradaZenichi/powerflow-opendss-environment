@@ -34,7 +34,8 @@ class ObservationTimingTest(unittest.TestCase):
                         "bess": {"b1": {"p_net_kw": -10.0, "q_injection_kvar": 5.0}},
                         "pv": {"pv1": {"generation_kw": 0.0}},
                     }
-                    state, _, terminated, _, info = env.step(action)
+                    state, _, terminated, _, info = env.step(env.normalizer.normalize(action))
+                    info = env.normalizer.denormalize(info)
                     observation = env.observe()
                     reference = MicrogridEnv(EnvironmentConfig(case, 2, ()))
                     reference.reset()
@@ -44,7 +45,7 @@ class ObservationTimingTest(unittest.TestCase):
 
                     self.assertFalse(terminated)
                     self.assertEqual(observation["timestamp"], "2026-01-01T01:00:00")
-                    self.assertAlmostEqual(sum(observation["buses"]["bus_002"]["p_load_kw"].values()), 90.0)
+                    self.assertAlmostEqual(sum(observation["buses"]["bus_002"]["p_load_pu"].values()), 0.09)
                     for bus, values in observation["buses"].items():
                         for phase, voltage in values["v_before_pu"].items():
                             self.assertAlmostEqual(voltage, reference.current_bus_voltages_pu[bus][phase], places=7)
@@ -61,7 +62,7 @@ class ObservationTimingTest(unittest.TestCase):
                     self.assertEqual(len(env.results.costs), 1)
                     self.assertEqual(len(env.grid.array_kw), 1)
                     self.assertEqual(observation, env.observe())
-                    _, _, terminated, _, final_info = env.step(action)
+                    _, _, terminated, _, final_info = env.step(env.normalizer.normalize(action))
                     self.assertTrue(terminated)
                     self.assertEqual(len(bess.array_soc), 2)
                     self.assertEqual(len(env.results.costs), 2)
@@ -69,7 +70,7 @@ class ObservationTimingTest(unittest.TestCase):
                     env.reset()
                     self.assertEqual(env.bess_list[0].array_soc, [])
                     self.assertEqual(env.results.costs, [])
-                    self.assertTrue(all(value == 0.0 for value in env.observe()["bess"]["b1"]["previous_p_kw"].values()))
+                    self.assertTrue(all(value == 0.0 for value in env.observe()["bess"]["b1"]["previous_p_pu"].values()))
 
     def test_pv_availability_changes_without_rewriting_previous_powers(self):
         for config in ("config_per_phase.json", "config_delta.json"):
@@ -89,12 +90,12 @@ class ObservationTimingTest(unittest.TestCase):
                     }},
                     "pv": {"pv1": {"generation_kw": {"a": 4.0, "b": 5.0, "c": 6.0}}},
                 }
-                _, _, _, _, info = env.step(action)
+                _, _, _, _, info = env.step(env.normalizer.normalize(action))
                 observation = env.observe()
                 measured = env.current_device_measurements["pv"]["pv1"]["generation_kw"]
                 for phase, expected in zip(("a", "b", "c"), (1.0, 2.0, 3.0)):
                     self.assertAlmostEqual(measured[phase], expected, places=5)
-                    self.assertEqual(observation["pv"]["pv1"]["previous_p_kw"][phase], info["device_measurements"]["pv"]["pv1"]["generation_kw"][phase])
+                    self.assertEqual(observation["pv"]["pv1"]["previous_p_pu"][phase], info["device_measurements"]["pv"]["pv1"]["generation_pu"][phase])
                 self.assertEqual(pv.array_kw, [15.0])
                 self.assertEqual(len(env.bess_list[0].array_soc), 1)
                 self.assertEqual(observation, env.observe())
@@ -114,12 +115,12 @@ class ObservationTimingTest(unittest.TestCase):
                     pv.phase_profiles[phase] = pv.phase_profiles[phase].copy()
                     pv.phase_profiles[phase][1] = 0.0
                 action = {"bess": {}, "pv": {"pv1": {"generation_kw": 20.0, "q_injection_kvar": 5.0}}}
-                _, _, _, _, info = env.step(action)
+                _, _, _, _, info = env.step(env.normalizer.normalize(action))
                 measured = env.current_device_measurements["pv"]["pv1"]
                 self.assertAlmostEqual(measured["generation_total_kw"], -0.005 if night_var else 0.0, places=5)
                 self.assertAlmostEqual(measured["q_injection_total_kvar"], 5.0 if night_var else 0.0, places=5)
                 self.assertEqual(pv.array_kw, [20.0])
-                self.assertEqual(env.observe()["pv"]["pv1"]["previous_p_kw"], info["device_measurements"]["pv"]["pv1"]["generation_kw"])
+                self.assertEqual(env.observe()["pv"]["pv1"]["previous_p_pu"], info["device_measurements"]["pv"]["pv1"]["generation_pu"])
 
     def test_voltage_controls_converge_before_the_next_action(self):
         for config in ("config.json", "config_delta_volt.json"):
@@ -132,7 +133,7 @@ class ObservationTimingTest(unittest.TestCase):
                     load.array_kw[1] *= 5.0
                     load.array_kvar[1] *= 5.0
                 action = {"bess": {}, "pv": {"pv1": {"generation_kw": {"a": 10.0, "b": 10.0, "c": 10.0}}}}
-                env.step(action)
+                env.step(env.normalizer.normalize(action))
                 pv = env.pv_list[0]
                 snapshot = env.current_bus_snapshot
                 measured = env.current_device_measurements["pv"]["pv1"]
