@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from .case_source import resolve_case_source, validate_case_config
 from .elements import BESS, BESSConfig, Grid, Load, PV, PVConfig, Results
+from .network import Network
 
 
 _PHASE_DEMAND = re.compile(r"^P(.+)_([abcABC123])$")
@@ -42,9 +43,18 @@ def load_data(path):
     # circuit and line data
     topology = path / cfg["network"]["master"]
 
-    with open(topology, "r", encoding="utf-8") as f: 
-        # searches for "phases = x" in topology file and returns x
-        phases = int(re.search(r"phases\s*=\s*(\d+)",f.read(),re.IGNORECASE).group(1))
+    representation = cfg["network"].get("representation")
+    if representation is None:
+        # Compatibility with existing cases; new cases declare their meaning.
+        with open(topology, encoding="utf-8") as stream:
+            match = re.search(r"phases\s*=\s*(\d+)", stream.read(), re.IGNORECASE)
+        if match is None:
+            raise ValueError("Declare network.representation when Master.dss does not declare phases")
+        phases = int(match.group(1))
+        representation = "single_phase_equivalent" if phases == 1 else "three_phase"
+    else:
+        phases = 3 if representation == "three_phase" else 1
+    network = Network(representation, ("a", "b", "c")[:phases])
 
     # devices.json
     if devices_path.exists():
@@ -53,6 +63,9 @@ def load_data(path):
     else:
         devices = {}
     _validate_device_modes(devices)
+    for group in (devices.get("bess", []), devices.get("pv", [])):
+        for device in group:
+            network.connected_phases(device.get("phases", network.phases))
 
     # PV profiles
     pv_profiles = {}
@@ -112,6 +125,7 @@ def load_data(path):
         "timestamps": timestamps,
         "steps": steps,
         "phases": phases,
+        "network": network,
         "base_kv": base_kv,
         "base_kva": base_kva,
         "topology": topology,

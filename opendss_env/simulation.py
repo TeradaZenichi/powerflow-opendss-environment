@@ -91,7 +91,9 @@ def _current_snapshot(env):
 
 
 def _bus_kv_ln(env, bus):
-    if env.data["phases"] == 1:
+    if env.data.get("network") is not None and env.data["network"].representation == "single_phase_equivalent":
+        return float(env.data["base_kv"])
+    if env.data.get("network") is None and env.data["phases"] == 1:
         return float(env.data["base_kv"])
     env.dss.circuit.set_active_bus(bus)
     kv_ln = float(env.dss.bus.kv_base)
@@ -147,7 +149,8 @@ class DssDevice:
 
     def _bus(self, index):
         if index is None:
-            return self.device.bus
+            nodes = ".".join(str(_PHASE_NODE[phase]) for phase in self.phases)
+            return f"{self.device.bus}.{nodes}"
         phase = self.phases[index]
         bus = f"{self.device.bus}.{_PHASE_NODE[phase]}"
         if self.connection == "delta":
@@ -228,7 +231,7 @@ def collect_bus_measurements(env):
                 continue
             phase = _PHASE_NAME[node]
             voltages[bus][phase] = float(voltage_values[2 * position])
-            if env.data["phases"] == 1:
+            if env.network.representation == "single_phase_equivalent":
                 voltages_pu[bus][phase] = voltages[bus][phase] / (env.data["base_kv"] * 1000.0)
             else:
                 voltages_pu[bus][phase] = float(pu_values[2 * position])
@@ -288,6 +291,9 @@ def _simulation_setup(env):
     env.dss.text(f'compile "{env.data["topology"]}"')
     env.dss.text("Vsource.source.model=Ideal")
     env.dss.text("Set mode=snapshot controlmode=off")
+    env.dss.circuit.set_active_element("Vsource.source")
+    if env.dss.cktelement.num_phases != env.data["phases"]:
+        raise ValueError("network.representation must match the OpenDSS source phases")
 
     for pv in env.pv_list:
         DssDevice(env, pv, "Generator").create()

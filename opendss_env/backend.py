@@ -61,6 +61,10 @@ class _CktElement:
         self._dss = dss
 
     @property
+    def num_phases(self):
+        return self._dss.CktElement.NumPhases()
+
+    @property
     def node_order(self):
         return self._dss.CktElement.NodeOrder()
 

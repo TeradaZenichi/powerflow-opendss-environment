@@ -1,11 +1,13 @@
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass
+from datetime import timedelta
 
 import gymnasium as gym
 import numpy as np
 from pu_normalizer import PUNormalizer
 
 from .backend import OpenDSSDirectBackend
+from .actions import prepare_action
 from .data import load_data, episode_data
 from .states import build_named_observation, build_state
 from .rewards import minimize_cost
@@ -20,11 +22,22 @@ from .simulation import (
 @dataclass(frozen=True)
 class EnvironmentConfig:
     case_path: object
-    episode_steps: int
+    episode_steps: int | None = None
     state_functions: tuple = ()
     num_episodes: int = 1
     start_episode: int = 0
     reward_function: object = minimize_cost
+
+    def __post_init__(self):
+        if self.episode_steps is not None and (
+            isinstance(self.episode_steps, bool) or not isinstance(self.episode_steps, int)
+            or self.episode_steps < 1
+        ):
+            raise ValueError("episode_steps must be a positive integer or None for the complete case")
+        if isinstance(self.num_episodes, bool) or not isinstance(self.num_episodes, int) or self.num_episodes < 1:
+            raise ValueError("num_episodes must be a positive integer")
+        if isinstance(self.start_episode, bool) or not isinstance(self.start_episode, int) or self.start_episode < 0:
+            raise ValueError("start_episode must be a nonnegative integer")
 
 
 class MicrogridEnv(gym.Env):
@@ -45,6 +58,9 @@ class MicrogridEnv(gym.Env):
         self.data = load_data(config.case_path)
         self.case_path = self.data["case_path"]
         self.config_path = self.data["config_path"]
+        self.network = self.data["network"]
+        if self.episode_steps is None:
+            self.episode_steps = self.data["steps"]
         self.normalizer = PUNormalizer(self.data["base_kva"], self.data["base_kv"])
 
         self.dss = OpenDSSDirectBackend()
@@ -52,6 +68,7 @@ class MicrogridEnv(gym.Env):
         self.current_device_measurements = {"bess": {}, "pv": {}}
         self.previous_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
+        self._needs_reset = True
 
         self.load_episode_data(self.start_episode)
         _simulation_setup(self)
@@ -70,6 +87,7 @@ class MicrogridEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
+        self._needs_reset = True
 
         episode_idx = options.get("episode_idx", 0) if options else 0
 
@@ -93,6 +111,7 @@ class MicrogridEnv(gym.Env):
         self.results.phase_angles_deg = {bus: {} for bus in self.dss.circuit.buses_names}
 
         prepare_pre_action_observation(self)
+        self._needs_reset = False
 
         observation = self.observe()
         state = build_state(self, self.state_functions) if self.state_functions else observation
@@ -100,12 +119,32 @@ class MicrogridEnv(gym.Env):
         return state, {"observation": deepcopy(observation)}
 
     def step(self, action=None):
+        if self._needs_reset:
+            raise RuntimeError("Call reset() before stepping, including after an execution failure")
+        if self.idx >= self.steps:
+            raise RuntimeError("The episode has terminated; call reset()")
+        prepared = prepare_action(self, action)
+        pending = self._copy_for_step()
+        try:
+            result = pending._run_step(prepared)
+        except Exception:
+            # OpenDSS may have changed; reset rebuilds it before another attempt.
+            self._needs_reset = True
+            raise
+        self._commit_step(pending)
+        return result
+
+    def _copy_for_step(self):
+        """Stage mutable simulation data while retaining the external DSS context."""
+        pending = copy(self)
+        pending.bess_list, pending.pv_list, pending.grid, pending.results = deepcopy(
+            (self.bess_list, self.pv_list, self.grid, self.results)
+        )
+        return pending
+
+    def _run_step(self, prepared):
         observation = self.observe()
-        physical_action = None
-        if action is not None:
-            self.normalizer.require_pu(action)
-            physical_action = self.normalizer.denormalize(action)
-        applied_action = _update_snapshot_powers(self, physical_action)
+        applied_action = _update_snapshot_powers(self, prepared.physical)
         grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
 
         self.current_cost = cost
@@ -120,7 +159,9 @@ class MicrogridEnv(gym.Env):
         info = {
             "units": "pu",
             "base": self.normalizer.as_dict()["base"],
+            "network": self.network.as_dict(),
             "timestamp": self.timestamps.iloc[self.idx - 1],
+            "interval_end": (self.timestamps.iloc[self.idx - 1] + timedelta(hours=self.dt)).isoformat(),
             "cost": cost,
             "reward": reward,
             "grid_kw": grid_kw,
@@ -129,7 +170,7 @@ class MicrogridEnv(gym.Env):
             "grid_export_kw": max(grid_kw, 0.0),
             "bus_voltages_pu": self.current_bus_voltages_pu,
             "bus_angles_deg": self.current_bus_angles_deg,
-            "requested_action": deepcopy(action),
+            "requested_action": prepared.requested,
             "executed_action": applied_action,
             "device_measurements": self.current_device_measurements,
             "observation": observation,  # Compatibility key for the pre-action observation.
@@ -146,7 +187,29 @@ class MicrogridEnv(gym.Env):
         self.normalizer.require_pu(info)
         return state, reward, terminated, truncated, info
 
+    def _commit_step(self, pending):
+        for current, completed in zip(self.bess_list, pending.bess_list):
+            current.commit(completed)
+        for current, completed in zip(self.pv_list, pending.pv_list):
+            current.commit(completed)
+        self.grid.array_kw[:] = pending.grid.array_kw
+        self.grid.array_kvar[:] = pending.grid.array_kvar
+        self.results.commit(pending.results)
+        self.idx = pending.idx
+        self.current_cost = pending.current_cost
+        self.episode_reward = pending.episode_reward
+        self.current_grid_kw = pending.current_grid_kw
+        self.current_grid_kvar = pending.current_grid_kvar
+        self.current_bus_snapshot = pending.current_bus_snapshot
+        self.current_bus_voltages_pu = pending.current_bus_voltages_pu
+        self.current_bus_angles_deg = pending.current_bus_angles_deg
+        self.current_voltages_pu = pending.current_voltages_pu
+        self.current_device_measurements = pending.current_device_measurements
+        self.previous_device_measurements = pending.previous_device_measurements
+
     def observe(self):
+        if self._needs_reset:
+            raise RuntimeError("Call reset() before observing, including after an execution failure")
         return build_named_observation(self)
 
     def get_episode_results(self):

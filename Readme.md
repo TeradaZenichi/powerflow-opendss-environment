@@ -255,7 +255,69 @@ PV:
     Q_PV
 ```
 
-The action passed to `step()` uses the following structure:
+An integration repository owns its scenarios; neither library requires them
+to live in an `examples/` directory:
+
+```python
+from pathlib import Path
+from opendss_env import Action, EnvironmentConfig, MicrogridEnv, TotalAction
+
+env = MicrogridEnv(EnvironmentConfig(Path("data/case5")))
+observation, info = env.reset()
+action = Action(
+    bess={"b1": TotalAction(p_pu=-0.018, q_pu=0.003)},
+    pv={"pv1": TotalAction(p_pu=0.0)},
+)
+observation, reward, terminated, truncated, info = env.step(action)
+```
+
+`episode_steps=None` (the default) uses the complete case. A directory or a
+configuration file can be passed as `case_path`. Relative data and DSS paths
+are resolved from that case, independently of the calling repository.
+
+Declare the network meaning in the case configuration:
+
+```json
+"network": {
+  "master": "dss/Master.dss",
+  "slack_bus": "bus_001",
+  "representation": "three_phase"
+}
+```
+
+| Representation | Power meaning | Configured voltage base |
+|---|---|---|
+| `single_phase` | Power of the physical single-phase device | Line-to-neutral |
+| `single_phase_equivalent` | Total power represented by the equivalent | Equivalent system base |
+| `three_phase` | Device total or explicit phase powers | Line-to-line |
+
+The representation must match the OpenDSS source phase count. Actual
+single-phase circuits must declare their bus voltage bases correctly in DSS;
+the environment preserves those per-bus bases. Existing cases without this
+field retain the legacy inference: one phase means the single-phase equivalent,
+three phases mean the physical three-phase model. `env.network` and the
+observation's `network` metadata expose the selected convention.
+
+`TotalAction` always means the whole device. It is distributed equally among
+its connected phases when dispatch is `per_phase`. `PhaseAction` specifies
+each connected phase explicitly:
+
+```python
+from opendss_env import PhaseAction
+
+action.bess["b1"] = PhaseAction(
+    p_pu={"a": -0.003, "b": -0.006, "c": -0.009},
+    q_pu={"a": 0.001, "b": 0.0, "c": -0.001},
+)
+```
+
+This unequal command requires a device configured with `dispatch_mode="per_phase"`.
+An aggregate device accepts total commands or balanced phase commands;
+unequal phase values are rejected instead of silently summed and redistributed.
+P is positive for BESS charging and PV generation, respectively. Q is positive
+for injection. All public action values use pu on the same total network base.
+
+The named dictionaries emitted by `Teacher.state_action()` remain supported:
 
 ```python
 {
@@ -282,6 +344,19 @@ for charging and `q_injection_pu > 0` for reactive injection. PV uses positive
 requested, device-limited, and electrically measured operation independently
 comparable.
 
+Every controlled BESS and PV must have a command, with valid fields, phases
+and finite values. Validation happens before OpenDSS or any energy state is
+modified. `Action.as_dict()` provides a copy for logging. `step(None)` retains
+the original 24-step reference controls for compatibility; externally driven
+experiments should supply complete actions explicitly.
+
+Each step runs on private copies of the device state and histories. Live
+SoC, results and the time index are committed only after the executed power
+flow, reward and next observation succeed. If execution fails, these remain
+at the last successful step. Call `reset()` before using `step()` or `observe()`
+again, because the external OpenDSS circuit may have changed. A command rejected
+by validation does not require a reset.
+
 Set `dispatch_mode` to `aggregate` for balanced device operation or
 `per_phase` to create one OpenDSS element per phase. Both `wye` and three-phase
 `delta` devices are supported. For delta devices, keys `a`, `b`, and `c`
@@ -304,6 +379,11 @@ there is no next decision, so this value is `None` and `terminated` is true.
 executed. The older `info["observation"]` key keeps the same pre-action meaning
 for compatibility. Other `info` measurements describe the executed snapshot.
 `reset()` also includes an independent copy under `info["observation"]`.
+`info["timestamp"]` identifies the beginning of the executed interval and
+`info["interval_end"]` its end. Each successful step integrates battery energy
+once, including conversion efficiencies and reactive-power losses. A battery
+keeps one SoC shared across its phases; phase dispatch is limited before energy
+integration so clipping the SoC cannot hide unfunded inverter losses.
 Explicit `state_functions` preserve the original numeric state vector;
 `env.observe()` always returns the named pu dictionary. Temporal history
 is assembled by the training application.

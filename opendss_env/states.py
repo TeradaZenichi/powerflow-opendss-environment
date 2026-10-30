@@ -114,6 +114,7 @@ def build_named_observation(env):
         "observation_schema_version": OBSERVATION_SCHEMA_VERSION,
         "units": "pu",
         "base": env.normalizer.as_dict()["base"],
+        "network": env.network.as_dict(),
         "phase_power_base": "total_network",
         "timestamp": env.timestamps.iloc[env.idx].isoformat(),
         "dt_h": float(env.dt),

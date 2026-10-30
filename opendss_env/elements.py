@@ -93,6 +93,21 @@ class PV:
         self.array_grid_consumption_kw = []
         self.array_inverter_loss_kw = []
 
+        self._control_request = None
+        self._phase_control_requests = {}
+        self._phase_points = {}
+
+    def commit(self, pending):
+        """Accept a complete, electrically solved operation from a private copy."""
+        self.array_kw[:] = pending.array_kw
+        self.array_kvar[:] = pending.array_kvar
+        self.array_p_net_kw[:] = pending.array_p_net_kw
+        self.array_grid_consumption_kw[:] = pending.array_grid_consumption_kw
+        self.array_inverter_loss_kw[:] = pending.array_inverter_loss_kw
+        self._control_request = pending._control_request
+        self._phase_control_requests = pending._phase_control_requests
+        self._phase_points = pending._phase_points
+
     def operate(self, p_pv, q_pv):
         return self.apply(PVRequest(p_pv, q_pv))
 
@@ -167,6 +182,14 @@ class BESS:
         self.array_kw = []
         self.array_kvar = []
         self.array_inverter_loss_kw = []
+
+    def commit(self, pending):
+        """Accept the energy state and histories only after a successful step."""
+        self.soc = pending.soc
+        self.array_soc[:] = pending.array_soc
+        self.array_kw[:] = pending.array_kw
+        self.array_kvar[:] = pending.array_kvar
+        self.array_inverter_loss_kw[:] = pending.array_inverter_loss_kw
 
     def operate(self, p_bess, q_bess, dt):
         if dt <= 0.0:
@@ -243,9 +266,15 @@ class BESS:
             * (q[phase] / phase_rating) ** 2
             for phase in phases
         ) if self.q_loss_rated_kw > 0.0 else 0.0
+        energy_above_min_kw = (self.soc - self.soc_min_frac) * self.e_cap_kwh / dt
+        available_loss_kw = max(energy_above_min_kw + self.eta_charge * charge, 0.0)
+        if inverter_loss_kw > available_loss_kw:
+            scale = math.sqrt(available_loss_kw / inverter_loss_kw)
+            q = {phase: value * scale for phase, value in q.items()}
+            inverter_loss_kw = available_loss_kw
         available_discharge_kw = max(
             (
-                (self.soc - self.soc_min_frac) * self.e_cap_kwh / dt
+                energy_above_min_kw + self.eta_charge * charge
                 - inverter_loss_kw
             ) * self.eta_discharge,
             0.0,
@@ -257,7 +286,7 @@ class BESS:
         max_charge_kw = max(
             (
                 (self.soc_max_frac - self.soc) * self.e_cap_kwh / dt
-                + inverter_loss_kw
+                + discharge / self.eta_discharge + inverter_loss_kw
             ) / self.eta_charge,
             0.0,
         )
@@ -301,3 +330,11 @@ class Results:
         self.phase_voltages = None
         self.phase_voltages_pu = None
         self.phase_angles_deg = None
+
+    def commit(self, pending):
+        self.costs[:] = pending.costs
+        self.voltages = pending.voltages
+        self.voltages_pu = pending.voltages_pu
+        self.phase_voltages = pending.phase_voltages
+        self.phase_voltages_pu = pending.phase_voltages_pu
+        self.phase_angles_deg = pending.phase_angles_deg
