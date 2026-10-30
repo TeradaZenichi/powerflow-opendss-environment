@@ -17,7 +17,7 @@ python -m pip install -e path\to\powerflow-opendss-environment
 The main simulation is configured in `main_env.py`. The main runtime options are defined at the top of the file:
 
 ```Python
-from opendss_env import EnvironmentConfig, MicrogridEnv
+from microgrid_env import EnvironmentConfig, MicrogridEnv
 
 CASE_PATH = project_dir / "examples" / "case5"
 
@@ -260,7 +260,8 @@ to live in an `examples/` directory:
 
 ```python
 from pathlib import Path
-from opendss_env import Action, EnvironmentConfig, MicrogridEnv, TotalAction
+from microgrid_env import EnvironmentConfig, MicrogridEnv
+from opendss_env import Action, TotalAction
 
 env = MicrogridEnv(EnvironmentConfig(Path("data/case5")))
 observation, info = env.reset()
@@ -452,7 +453,7 @@ Next state + reward
 The main environment is implemented in:
 
 ```text
-opendss_env/microgrid_env.py
+microgrid_env.py
 ```
 
 through the:
@@ -462,6 +463,15 @@ MicrogridEnv
 ```
 
 class.
+
+`EnvironmentConfig` is defined in the same root module. Import both directly:
+
+```python
+from microgrid_env import EnvironmentConfig, MicrogridEnv
+```
+
+The previous imports from `opendss_env` and `opendss_env.microgrid_env` remain
+available as compatibility paths to these same classes.
 
 The environment follows the standard Gymnasium interaction:
 
@@ -711,36 +721,25 @@ The main repository structure is:
 ```text
 powerflow-opendss-environment/
 │
-├── examples/                     Contains example network cases and their input data.
-│   └── case5/
-│       ├── config.json
-│       ├── devices.json
-│       ├── demand.csv
-│       ├── price.csv
-│       ├── pv.csv
-│       └── dss/
-│           └── Master.dss
-│
-├── opendss_env/
-│   ├── __init__.py
-│   ├── data.py                   Loads the case data and prepares the data used by each simulation episode.
-│   ├── devices_control.py        Defines the current BESS and PV control strategies.
-│   ├── elements.py               Contains the classes representing the main simulation elements, such as BESS, PV, loads, and grid-related objects.
-│   ├── microgrid_env.py          Implements the Gymnasium environment and controls the simulation lifecycle
-│   ├── rewards.py                Contains reward functions that can be selected by the user.
-│   ├── simulation.py             Contains the OpenDSS simulation routines, including circuit initialization, device and load updates, power-flow execution, and result collection.
-│   ├── states.py                 Contains the functions used to construct the observation/state provided to the controller.
-│   │ 
-│   └── results_scripts/          Contains the post-processing routines used to generate plots, CSV files, and simulation summaries.
-│       ├── plots.py
-│       ├── results.py
-│       └── summary.py
-│
-├── outputs/
-│   └── case5/
-│       ├── plots/
-│       └── summary/
-│
-├── main_env.py                   Provides an example of how to instantiate and run the environment.
-└── README.md
+├── microgrid_env.py              EnvironmentConfig and MicrogridEnv implementation.
+├── main_env.py                   Example simulation runner.
+├── opendss_env/                  Supporting modules.
+│   ├── actions.py                Total and per-phase actions and validation.
+│   ├── backend.py                OpenDSSDirect adapter.
+│   ├── case_source.py            External case paths and schema validation.
+│   ├── contracts.py              Observation schema version.
+│   ├── data.py                   Case loading and episode data.
+│   ├── devices_control.py        Reference control profiles.
+│   ├── elements.py               BESS, PV, load, grid and result classes.
+│   ├── microgrid_env.py          Compatibility imports only.
+│   ├── network.py                Physical network representation.
+│   ├── pv_droop.py               PV control curves.
+│   ├── rewards.py                Reward functions.
+│   ├── simulation.py             Electrical simulation and measurements.
+│   ├── states.py                 Observation construction.
+│   └── results_scripts/          Plots and simulation reports.
+├── examples/                     Example scenario data.
+├── tests/                        Physical and API checks.
+├── pyproject.toml                Package installation settings.
+└── Readme.md
 ```
