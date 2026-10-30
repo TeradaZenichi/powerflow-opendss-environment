@@ -7,28 +7,28 @@ import unittest
 
 import pandas as pd
 
-from opendss_env.data import (
+from opendss_environment.data import (
     _require_timestamps,
     _validate_device_modes,
     episode_data,
     get_dt_hours,
     load_data,
 )
-from opendss_env.case_source import validate_case_config
-from opendss_env.devices_control import (
+from opendss_environment.case_source import validate_case_config
+from opendss_environment.devices_control import (
     BESS_KVAR,
     BESS_KW,
     PV_KVAR,
     bess_control,
     pv_control,
 )
-from opendss_env.elements import BESS, PV, BESSConfig, PVConfig, PVRequest
-from opendss_env.microgrid_env import EnvironmentConfig, MicrogridEnv
-from opendss_env.simulation import (
+from opendss_environment.elements import BESS, PV, BESSConfig, PVConfig, PVRequest
+from opendss_environment.microgrid_env import EnvironmentConfig, MicrogridEnv
+from opendss_environment.simulation import (
     _update_snapshot_powers,
     collect_device_measurements,
 )
-from opendss_env.states import get_bess_soc
+from opendss_environment.states import get_bess_soc
 
 
 CASE_PATH = Path(__file__).resolve().parents[1] / "examples" / "case5"

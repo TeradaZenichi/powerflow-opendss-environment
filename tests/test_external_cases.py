@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from opendss_env import Action, EnvironmentConfig, MicrogridEnv, TotalAction
+from opendss_environment import Action, EnvironmentConfig, MicrogridEnv, TotalAction
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "examples" / "case5"

@@ -1,7 +1,7 @@
 from pathlib import Path
-from microgrid_env import EnvironmentConfig, MicrogridEnv
-from opendss_env.rewards import minimize_cost
-from opendss_env.results_scripts.results import simulation_results
+from opendss_environment.microgrid_env import EnvironmentConfig, MicrogridEnv
+from opendss_environment.rewards import minimize_cost
+from opendss_environment.results_scripts.results import simulation_results
 
 if __name__ == "__main__":
 

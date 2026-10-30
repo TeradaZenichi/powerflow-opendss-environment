@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from opendss_env.elements import BESS, BESSConfig
+from opendss_environment.elements import BESS, BESSConfig
 
 
 def battery(soc):

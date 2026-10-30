@@ -3,9 +3,9 @@ import shutil
 from tempfile import TemporaryDirectory
 import unittest
 
-from opendss_env import EnvironmentConfig, MicrogridEnv
-from opendss_env.elements import PVRequest
-from opendss_env.simulation import _update_snapshot_powers, solve_power_flow
+from opendss_environment import EnvironmentConfig, MicrogridEnv
+from opendss_environment.elements import PVRequest
+from opendss_environment.simulation import _update_snapshot_powers, solve_power_flow
 
 
 ROOT = Path(__file__).resolve().parents[1]

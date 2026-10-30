@@ -5,8 +5,8 @@ import unittest
 
 import numpy as np
 
-from opendss_env import EnvironmentConfig, MicrogridEnv
-from opendss_env.states import get_bess_soc, get_hour
+from opendss_environment import EnvironmentConfig, MicrogridEnv
+from opendss_environment.states import get_bess_soc, get_hour
 
 
 CASE = Path(__file__).resolve().parents[1] / "examples" / "case5"

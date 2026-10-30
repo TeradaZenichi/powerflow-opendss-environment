@@ -7,12 +7,12 @@ import gymnasium as gym
 import numpy as np
 from pu_normalizer import PUNormalizer
 
-from opendss_env.backend import OpenDSSDirectBackend
-from opendss_env.actions import prepare_action
-from opendss_env.data import load_data, episode_data
-from opendss_env.states import build_named_observation, build_state
-from opendss_env.rewards import minimize_cost
-from opendss_env.simulation import (
+from opendss_environment.backend import OpenDSSDirectBackend
+from opendss_environment.actions import prepare_action
+from opendss_environment.data import load_data, episode_data
+from opendss_environment.states import build_named_observation, build_state
+from opendss_environment.rewards import minimize_cost
+from opendss_environment.simulation import (
     _simulation_setup,
     _update_snapshot_powers,
     prepare_pre_action_observation,

@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
-from opendss_env import Action, EnvironmentConfig, MicrogridEnv, TotalAction
+from opendss_environment import Action, EnvironmentConfig, MicrogridEnv, TotalAction
 
 
 CASE = Path(__file__).resolve().parents[1] / "examples" / "case5"
@@ -38,7 +38,7 @@ class StepExecutionTest(unittest.TestCase):
 
     def test_power_flow_failure_keeps_live_state_and_requires_reset(self):
         original_battery = self.env.bess_list[0]
-        with patch("microgrid_env.solve_power_flow", side_effect=RuntimeError("power flow failed")):
+        with patch("opendss_environment.microgrid_env.solve_power_flow", side_effect=RuntimeError("power flow failed")):
             with self.assertRaisesRegex(RuntimeError, "power flow failed"):
                 self.env.step(self.action)
         self.assert_no_step_recorded()
@@ -54,7 +54,7 @@ class StepExecutionTest(unittest.TestCase):
         self.assertEqual(len(self.env.bess_list[0].array_soc), 1)
 
     def test_failure_preparing_the_next_snapshot_does_not_commit(self):
-        with patch("microgrid_env.prepare_pre_action_observation", side_effect=RuntimeError("next snapshot failed")):
+        with patch("opendss_environment.microgrid_env.prepare_pre_action_observation", side_effect=RuntimeError("next snapshot failed")):
             with self.assertRaisesRegex(RuntimeError, "next snapshot failed"):
                 self.env.step(self.action)
         self.assert_no_step_recorded()
@@ -65,7 +65,7 @@ class StepExecutionTest(unittest.TestCase):
         soc = bess.soc
         costs = list(self.env.results.costs)
         powers = list(bess.array_kw)
-        with patch("microgrid_env.solve_power_flow", side_effect=RuntimeError("power flow failed")):
+        with patch("opendss_environment.microgrid_env.solve_power_flow", side_effect=RuntimeError("power flow failed")):
             with self.assertRaisesRegex(RuntimeError, "power flow failed"):
                 self.env.step(self.action)
         self.assertEqual(self.env.idx, 1)

@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from opendss_env import Action, EnvironmentConfig, MicrogridEnv, PhaseAction, TotalAction
+from opendss_environment import Action, EnvironmentConfig, MicrogridEnv, PhaseAction, TotalAction
 
 
 ROOT = Path(__file__).resolve().parents[1]
