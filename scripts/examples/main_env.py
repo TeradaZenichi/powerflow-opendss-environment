@@ -5,7 +5,7 @@ from opendss_environment.results_scripts.results import simulation_results
 
 if __name__ == "__main__":
 
-    project_dir = Path(__file__).resolve().parent
+    project_dir = Path(__file__).resolve().parents[2]
     CASE_PATH = project_dir / "examples" / "case123"
 
     EPISODE_STEPS = 24

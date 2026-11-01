@@ -30,12 +30,17 @@ python -m pip install -e path\to\opendss_environment
 
 ## Running the example
 
-The main simulation is configured in `main_env.py`. The main runtime options are defined at the top of the file:
+The main simulation is configured in `scripts/examples/main_env.py`. Run the commands
+below from the repository root. Its default scenario is `examples/case123`:
 
 ```Python
-from opendss_environment.microgrid_env import EnvironmentConfig, MicrogridEnv
+from pathlib import Path
 
-CASE_PATH = project_dir / "examples" / "case5"
+from opendss_environment.microgrid_env import EnvironmentConfig, MicrogridEnv
+from opendss_environment.rewards import minimize_cost
+
+project_dir = Path(__file__).resolve().parents[2]
+CASE_PATH = project_dir / "examples" / "case123"
 
 EPISODE_STEPS = 24
 NUM_EPISODES = 1
@@ -44,14 +49,6 @@ START_EPISODE = 0
 config = EnvironmentConfig(
     case_path=CASE_PATH,
     episode_steps=EPISODE_STEPS,
-    state_functions=(
-        get_hour,
-        get_price,
-        get_previous_pv_kw,
-        get_bess_soc,
-        get_previous_load_kw,
-        get_current_load_kw,
-    ),
     num_episodes=NUM_EPISODES,
     start_episode=START_EPISODE,
     reward_function=minimize_cost,
@@ -65,19 +62,19 @@ The main configuration fields are:
 * `EPISODE_STEPS`: number of time steps in each episode;
 * `NUM_EPISODES`: number of episodes to simulate;
 * `START_EPISODE`: first episode to run;
-* `state_functions`: variables included in the environment state;
+* `state_functions` (optional): variables included in a custom environment state;
 * `reward_function`: reward used by the environment.
 
 Run:
 
 ```
-.\.venv\Scripts\python.exe main_env.py
+.\.venv\Scripts\python.exe scripts/examples/main_env.py
 ```
 
 After the simulation, the results are written to:
 
 ```
-outputs/case5/
+outputs/case123/
 ├── plots/
 └── summary/
 ```
@@ -598,6 +595,10 @@ def minimize_cost(env):
 
 Since the objective is to minimize the operating cost, the negative cost is used as the reward.
 
+Import is billed at the buy price. Export is credited at the buy price multiplied
+by `grid.feed_in_tariff_ratio`. The reward is the negative executed interval cost;
+episode reward is its sum over the simulated intervals.
+
 A voltage-deviation reward is also available:
 
 ```python
@@ -736,7 +737,8 @@ The main repository structure is:
 ```text
 opendss_environment/
 │
-├── main_env.py                   Example simulation runner.
+├── scripts/examples/
+│   └── main_env.py               Example simulation runner.
 ├── opendss_environment/          Python package.
 │   ├── __init__.py               Public environment and action classes.
 │   ├── actions.py                Total and per-phase actions and validation.

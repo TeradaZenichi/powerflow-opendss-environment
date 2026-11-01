@@ -566,7 +566,9 @@ def solve_power_flow(env, applied_action=None):
     env.grid.array_kw.append(grid_kw)
     env.grid.array_kvar.append(grid_kvar)
 
-    cost = -grid_kw * env.grid.prices[env.idx] * env.dt
+    import_kw = max(-grid_kw, 0.0)
+    export_kw = max(grid_kw, 0.0)
+    cost = (import_kw - env.data["feed_in_tariff_ratio"] * export_kw) * env.grid.prices[env.idx] * env.dt
     env.results.costs.append(cost)
 
     env.current_grid_kw = grid_kw
