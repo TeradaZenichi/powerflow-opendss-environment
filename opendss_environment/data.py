@@ -144,8 +144,8 @@ def episode_data(data, episode_idx, episode_steps):
     Returns the data corresponding to one episode.
     """
 
-    episode_start = episode_idx * episode_steps
-    episode_end = episode_idx * episode_steps + episode_steps
+    episode_start = data.get("start_step", 0) + episode_idx * episode_steps
+    episode_end = episode_start + episode_steps
 
     if episode_end > data["steps"]:
         raise ValueError(

@@ -28,6 +28,7 @@ class EnvironmentConfig:
     num_episodes: int = 1
     start_episode: int = 0
     reward_function: object = minimize_cost
+    start_step: int = 0
 
     def __post_init__(self):
         if self.episode_steps is not None and (
@@ -39,6 +40,8 @@ class EnvironmentConfig:
             raise ValueError("num_episodes must be a positive integer")
         if isinstance(self.start_episode, bool) or not isinstance(self.start_episode, int) or self.start_episode < 0:
             raise ValueError("start_episode must be a nonnegative integer")
+        if isinstance(self.start_step, bool) or not isinstance(self.start_step, int) or self.start_step < 0:
+            raise ValueError("start_step must be a nonnegative integer")
 
 
 class MicrogridEnv(gym.Env):
@@ -57,11 +60,14 @@ class MicrogridEnv(gym.Env):
         self.end_episode = config.start_episode + config.num_episodes
 
         self.data = load_data(config.case_path)
+        if config.start_step >= self.data["steps"]:
+            raise ValueError("start_step must identify an interval in the dataset")
+        self.data["start_step"] = config.start_step
         self.case_path = self.data["case_path"]
         self.config_path = self.data["config_path"]
         self.network = self.data["network"]
         if self.episode_steps is None:
-            self.episode_steps = self.data["steps"]
+            self.episode_steps = self.data["steps"] - config.start_step
         self.normalizer = PUNormalizer(self.data["base_kva"], self.data["base_kv"])
 
         self.dss = OpenDSSDirectBackend()

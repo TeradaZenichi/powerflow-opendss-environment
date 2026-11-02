@@ -62,8 +62,14 @@ The main configuration fields are:
 * `EPISODE_STEPS`: number of time steps in each episode;
 * `NUM_EPISODES`: number of episodes to simulate;
 * `START_EPISODE`: first episode to run;
+* `start_step` (optional): initial dataset row offset, applied before episode indexing;
 * `state_functions` (optional): variables included in a custom environment state;
 * `reward_function`: reward used by the environment.
+
+For a selected dataset range, use
+`EnvironmentConfig(case_path=CASE_PATH, episode_steps=96, start_step=480)`.
+The default offset is zero. With `episode_steps=None`, the episode includes
+all remaining rows after the offset.
 
 Run:
 
