@@ -1,6 +1,5 @@
 import json
 import re
-from pathlib import Path
 import pandas as pd
 import numpy as np
 from .case_source import resolve_case_source, validate_case_config
@@ -174,7 +173,6 @@ def episode_data(data, episode_idx, episode_steps):
         pv_list.append(pv)
 
     # load
-    demand = data["demand"][episode_start:episode_end]
     load_list = []
 
     for col in data["demand"].columns:

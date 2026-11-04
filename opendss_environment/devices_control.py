@@ -25,22 +25,6 @@ PV_KVAR = np.array([
     49.927218, 0.0, 0.0, 0.0, 0.0, 0.0,
 ]) 
 
-# the following are used in case13 due to lower battery and pv capacity
-"""
-PV_KVAR = np.array([
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-])
-
-BESS_KVAR = np.array([
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-])
-"""
 def bess_control(bess, idx, dt, bess_kw, bess_kvar):
     return bess.operate(
         bess_kw[idx],
