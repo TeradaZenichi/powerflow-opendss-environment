@@ -161,6 +161,15 @@ do not solve again or change the state. Only `step(action)` advances battery
 energy and records one cost and one set of results. Its `info` contains the
 post-action measurements for the step just executed.
 
+`info["bus_voltages_v"]` contains executed phase-to-neutral voltages in volts.
+`info["branch_measurements"]` lists line/transformer phase measurements by
+element, terminal and connected bus. `p_flow_pu` and `q_flow_pu` are positive
+entering the element from that bus, on the total-network power base.
+`current_a` is the current magnitude in amperes and `current_angle_deg` its
+angle in degrees. Both terminal directions are captured before preparing the
+next interval; neutral conductors are omitted. These diagnostic fields do not
+change the controller's observation.
+
 Voltages are phase-to-neutral magnitudes in per unit. Three-phase circuits use
 the OpenDSS voltage base of each bus. The single-phase equivalent uses the case's
 `base.v_base_kv` as its phase-to-neutral base, matching the device voltage setup.

@@ -13,6 +13,10 @@ class _Circuit:
         return self._dss.Circuit.AllBusNames()
 
     @property
+    def elements_names(self):
+        return self._dss.Circuit.AllElementNames()
+
+    @property
     def total_power(self):
         return self._dss.Circuit.TotalPower()
 
@@ -71,6 +75,14 @@ class _CktElement:
     @property
     def num_conductors(self):
         return self._dss.CktElement.NumConductors()
+
+    @property
+    def bus_names(self):
+        return self._dss.CktElement.BusNames()
+
+    @property
+    def currents_mag_ang(self):
+        return self._dss.CktElement.CurrentsMagAng()
 
     @property
     def powers(self):

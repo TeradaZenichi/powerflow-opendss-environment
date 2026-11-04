@@ -214,6 +214,34 @@ def collect_device_measurements(env):
     return measurements
 
 
+def collect_branch_measurements(env):
+    """Read phase currents and powers entering each line/transformer terminal."""
+    measurements = []
+    base = env.data["base_kva"]
+    for name in env.dss.circuit.elements_names:
+        if not name.lower().startswith(("line.", "transformer.")):
+            continue
+        env.dss.circuit.set_active_element(name)
+        element = env.dss.cktelement
+        nodes, powers = element.node_order, element.powers
+        currents, count = element.currents_mag_ang, element.num_conductors
+        for terminal, bus in enumerate(element.bus_names):
+            for conductor in range(count):
+                position = terminal * count + conductor
+                node = nodes[position]
+                if node not in _PHASE_NAME:
+                    continue
+                measurements.append({
+                    "element": name, "terminal": terminal + 1,
+                    "bus": bus.split(".", 1)[0].lower(), "phase": _PHASE_NAME[node],
+                    "p_flow_pu": float(powers[2 * position]) / base,
+                    "q_flow_pu": float(powers[2 * position + 1]) / base,
+                    "current_a": float(currents[2 * position]),
+                    "current_angle_deg": float(currents[2 * position + 1]),
+                })
+    return measurements
+
+
 def collect_bus_measurements(env):
     voltages_pu = {}
     angles_deg = {}
@@ -583,4 +611,5 @@ def solve_power_flow(env, applied_action=None):
     env.current_bus_angles_deg = snapshot.angles
     env.current_device_measurements = collect_device_measurements(env)
 
+    env.current_branch_measurements = collect_branch_measurements(env)
     return grid_kw, grid_kvar, cost

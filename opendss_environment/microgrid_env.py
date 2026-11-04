@@ -73,6 +73,7 @@ class MicrogridEnv(gym.Env):
         self.dss = OpenDSSDirectBackend()
         self.current_cost = 0.0
         self.current_device_measurements = {"bess": {}, "pv": {}}
+        self.current_branch_measurements = []
         self.previous_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
         self._needs_reset = True
@@ -106,6 +107,7 @@ class MicrogridEnv(gym.Env):
         self.idx = 0
         self.current_cost = 0.0
         self.current_device_measurements = {"bess": {}, "pv": {}}
+        self.current_branch_measurements = []
         self.previous_device_measurements = {"bess": {}, "pv": {}}
         self.episode_reward = 0.0
 
@@ -176,7 +178,9 @@ class MicrogridEnv(gym.Env):
             "grid_import_kw": max(-grid_kw, 0.0),
             "grid_export_kw": max(grid_kw, 0.0),
             "bus_voltages_pu": self.current_bus_voltages_pu,
+            "bus_voltages_v": self.current_bus_snapshot.volts,
             "bus_angles_deg": self.current_bus_angles_deg,
+            "branch_measurements": self.current_branch_measurements,
             "requested_action": prepared.requested,
             "executed_action": applied_action,
             "device_measurements": self.current_device_measurements,
@@ -212,6 +216,7 @@ class MicrogridEnv(gym.Env):
         self.current_bus_angles_deg = pending.current_bus_angles_deg
         self.current_voltages_pu = pending.current_voltages_pu
         self.current_device_measurements = pending.current_device_measurements
+        self.current_branch_measurements = pending.current_branch_measurements
         self.previous_device_measurements = pending.previous_device_measurements
 
     def observe(self):
