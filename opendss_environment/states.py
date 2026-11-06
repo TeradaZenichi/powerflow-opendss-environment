@@ -1,19 +1,7 @@
 import numpy as np
 
 from .contracts import OBSERVATION_SCHEMA_VERSION
-
-
-_PHASE_NAME = {1: "a", 2: "b", 3: "c"}
-
-
-def _phase_names(device, default_phase_count):
-    phases = device.phases or tuple(range(1, default_phase_count + 1))
-    return tuple(
-        _PHASE_NAME.get(int(phase), str(phase).lower())
-        if isinstance(phase, int) or str(phase).isdigit()
-        else str(phase).lower()
-        for phase in phases
-    )
+from .network import PHASE_NAME as _PHASE_NAME, device_phases as _phase_names
 
 
 def _phase_values(values, phases):

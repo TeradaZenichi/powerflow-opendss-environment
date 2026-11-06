@@ -4,9 +4,9 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 from .devices_control import BESS_KVAR, BESS_KW, PV_KVAR, bess_control
 from .elements import PVPoint, PVRequest
+from .network import PHASE_NAME as _PHASE_NAME, device_phases as _device_phases
 
 
-_PHASE_NAME = {1: "a", 2: "b", 3: "c"}
 _PHASE_NODE = {value: key for key, value in _PHASE_NAME.items()}
 
 
@@ -25,18 +25,6 @@ def _phase_result(value, phases, default_phase_count):
     )
     share = float(value) / len(names)
     return {phase: share for phase in names}
-
-
-def _device_phases(device, default_phase_count):
-    return tuple(
-        _PHASE_NAME.get(int(phase), str(phase).lower())
-        if isinstance(phase, int) or str(phase).isdigit()
-        else str(phase).lower()
-        for phase in (
-            getattr(device, "phases", ())
-            or tuple(range(1, default_phase_count + 1))
-        )
-    )
 
 
 def _element_name(device, phase=None):
@@ -183,34 +171,18 @@ def collect_device_measurements(env):
 
     measurements = {"bess": {}, "pv": {}}
 
-    for bess in env.bess_list:
-        terminal = DssDevice(env, bess, "Load").terminal_power()
-        p_net = {phase: value["p_kw"] for phase, value in terminal.items()}
-        q_injection = {
-            phase: -value["q_kvar"] for phase, value in terminal.items()
-        }
-        measurements["bess"][bess.id] = {
-            "p_net_kw": p_net,
-            "q_injection_kvar": q_injection,
-            "p_net_total_kw": sum(p_net.values()),
-            "q_injection_total_kvar": sum(q_injection.values()),
-        }
-
-    for pv in env.pv_list:
-        terminal = DssDevice(env, pv, "Generator").terminal_power()
-        generation = {
-            phase: -value["p_kw"] for phase, value in terminal.items()
-        }
-        q_injection = {
-            phase: -value["q_kvar"] for phase, value in terminal.items()
-        }
-        measurements["pv"][pv.id] = {
-            "generation_kw": generation,
-            "q_injection_kvar": q_injection,
-            "generation_total_kw": sum(generation.values()),
-            "q_injection_total_kvar": sum(q_injection.values()),
-        }
-
+    for kind, devices, element, active_field, total_field, sign in (
+        ("bess", env.bess_list, "Load", "p_net_kw", "p_net_total_kw", 1.0),
+        ("pv", env.pv_list, "Generator", "generation_kw", "generation_total_kw", -1.0),
+    ):
+        for device in devices:
+            terminal = DssDevice(env, device, element).terminal_power()
+            active = {phase: sign * value["p_kw"] for phase, value in terminal.items()}
+            reactive = {phase: -value["q_kvar"] for phase, value in terminal.items()}
+            measurements[kind][device.id] = {
+                active_field: active, "q_injection_kvar": reactive,
+                total_field: sum(active.values()), "q_injection_total_kvar": sum(reactive.values()),
+            }
     return measurements
 
 

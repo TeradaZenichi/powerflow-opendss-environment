@@ -2,6 +2,17 @@
 from dataclasses import dataclass
 
 
+PHASE_NAME = {1: "a", 2: "b", 3: "c"}
+
+
+def device_phases(device, default_phase_count):
+    """Return connected phase names, including legacy numeric node labels."""
+    phases = getattr(device, "phases", ()) or tuple(range(1, default_phase_count + 1))
+    return tuple(PHASE_NAME.get(int(phase), str(phase).lower())
+                 if isinstance(phase, int) or str(phase).isdigit() else str(phase).lower()
+                 for phase in phases)
+
+
 @dataclass(frozen=True)
 class Network:
     representation: str

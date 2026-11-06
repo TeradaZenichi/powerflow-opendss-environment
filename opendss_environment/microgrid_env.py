@@ -84,14 +84,8 @@ class MicrogridEnv(gym.Env):
     def load_episode_data(self, episode_idx):
         episode = episode_data(self.data, episode_idx, self.episode_steps)
 
-        self.dt = episode["dt"]
-        self.steps = episode["steps"]
-        self.timestamps = episode["timestamps"]
-        self.grid = episode["grid"]
-        self.bess_list = episode["bess_list"]
-        self.pv_list = episode["pv_list"]
-        self.load_list = episode["load_list"]
-        self.results = episode["results"]
+        for name in ("dt", "steps", "timestamps", "grid", "bess_list", "pv_list", "load_list", "results"):
+            setattr(self, name, episode[name])
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -206,18 +200,10 @@ class MicrogridEnv(gym.Env):
         self.grid.array_kw[:] = pending.grid.array_kw
         self.grid.array_kvar[:] = pending.grid.array_kvar
         self.results.commit(pending.results)
-        self.idx = pending.idx
-        self.current_cost = pending.current_cost
-        self.episode_reward = pending.episode_reward
-        self.current_grid_kw = pending.current_grid_kw
-        self.current_grid_kvar = pending.current_grid_kvar
-        self.current_bus_snapshot = pending.current_bus_snapshot
-        self.current_bus_voltages_pu = pending.current_bus_voltages_pu
-        self.current_bus_angles_deg = pending.current_bus_angles_deg
-        self.current_voltages_pu = pending.current_voltages_pu
-        self.current_device_measurements = pending.current_device_measurements
-        self.current_branch_measurements = pending.current_branch_measurements
-        self.previous_device_measurements = pending.previous_device_measurements
+        for name in ("idx", "current_cost", "episode_reward", "current_grid_kw", "current_grid_kvar",
+                     "current_bus_snapshot", "current_bus_voltages_pu", "current_bus_angles_deg", "current_voltages_pu",
+                     "current_device_measurements", "current_branch_measurements", "previous_device_measurements"):
+            setattr(self, name, getattr(pending, name))
 
     def observe(self):
         if self._needs_reset:
