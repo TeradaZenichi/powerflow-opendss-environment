@@ -37,11 +37,18 @@ class ObservationTimingTest(unittest.TestCase):
                     state, _, terminated, _, info = env.step(env.normalizer.normalize(action))
                     info = env.normalizer.denormalize(info)
                     observation = env.observe()
+                    if state is None or not observation["branches"]:
+                        self.fail("The next pre-action snapshot must expose branch measurements")
                     reference = MicrogridEnv(EnvironmentConfig(case, 2, ()))
                     reference.reset()
                     reference.idx = 1
                     applied = _update_snapshot_powers(reference, action)
                     solve_power_flow(reference, applied)
+                    actual = {(row["element"], row["terminal"], row["phase"]): row for row in observation["branches"]}
+                    for row in reference.current_branch_measurements:
+                        measured = actual[(row["element"], row["terminal"], row["phase"])]
+                        if any(abs(measured[name] - row[name]) > 1e-5 for name in ("p_flow_pu", "q_flow_pu", "current_a")):
+                            self.fail("Pre-action branches must use current loads and held device actions")
 
                     self.assertFalse(terminated)
                     self.assertEqual(observation["timestamp"], "2026-01-01T01:00:00")

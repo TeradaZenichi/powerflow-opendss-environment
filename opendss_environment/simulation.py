@@ -283,6 +283,8 @@ def prepare_pre_action_observation(env):
     }
     env.current_device_measurements = collect_device_measurements(env)
 
+    env.pre_action_branch_measurements = collect_branch_measurements(env)
+
 
 def _simulation_setup(env):
     """Create the OpenDSS circuit and its devices."""

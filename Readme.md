@@ -595,48 +595,53 @@ The state definition is configurable, allowing different observation spaces to b
 
 ## Rewards
 
-Reward functions are defined in:
-
-```text
-opendss_environment/rewards.py
-```
-
-The current implementation includes a cost-based reward:
+`Reward` in `opendss_environment/rewards.py` groups the cost reward and optional
+local objectives. The environment still defaults to `Reward.minimize_cost`:
+negative executed grid cost, with import billed at the buy price and export
+credited according to `grid.feed_in_tariff_ratio`.
 
 ```python
-def minimize_cost(env):
-    return -env.results.costs[env.idx]
-```
+from opendss_environment import EnvironmentConfig, MicrogridEnv, Reward
 
-Since the objective is to minimize the operating cost, the negative cost is used as the reward.
-
-Import is billed at the buy price. Export is credited at the buy price multiplied
-by `grid.feed_in_tariff_ratio`. The reward is the negative executed interval cost;
-episode reward is its sum over the simulated intervals.
-
-A voltage-deviation reward is also available:
-
-```python
-def minimize_voltage_deviation(env):
-    deviation = 0.0
-
-    for bus in env.results.voltages_pu:
-        voltage = env.results.voltages_pu[bus][env.idx]
-        deviation += abs(voltage - 1.0)
-
-    return -deviation
-```
-
-This reward penalizes deviations of the bus voltage magnitudes from 1.0 pu.
-
-The reward function is passed directly to the environment:
-
-```python
-config = EnvironmentConfig(case_path, episode_steps, state_functions, reward_function=minimize_cost)
+reward = Reward(bus="bus_004", v_min=0.98, v_max=1.02)
+config = EnvironmentConfig(case_path, reward_function=reward)
 env = MicrogridEnv(config)
 ```
 
-This structure allows additional objectives or reward functions to be added independently of the environment implementation.
+Calling the instance uses cost only. Secondary objectives are available as
+methods and are not silently added to the reward:
+
+| Method | Return value |
+|---|---|
+| `minimize_cost(env)` | Negative executed global grid cost, in case currency |
+| `minimize_voltage_deviation(env, reference=1.0)` | Negative sum of voltage deviations over the selected bus phases |
+| `minimize_voltage_violation(env)` | Negative sum of deviations outside `[v_min, v_max]`, in pu |
+| `minimize_voltage_unbalance(env, maximum_pct=0.0)` | Negative VUF above the target, in percentage points |
+| `minimize_import(env)` | Negative local imported energy, in kWh per interval |
+| `minimize_reactive_power(env)` | Negative magnitude of local net Q, in kvar |
+| `minimize_power_violation(env, import_limit_kw, export_limit_kw)` | Negative power outside the permitted import/export range, in kW |
+| `track_power(env, p_reference_kw=0.0, q_reference_kvar=0.0)` | Negative distance to the requested local P/Q, in kVA |
+
+For example, `reward_function=reward.minimize_voltage_violation` selects the
+local voltage-band objective. A caller-provided function can combine cost and
+secondary methods with explicit weights/scales; their units differ.
+
+Local power is the signed sum over all line/transformer terminals connected
+to the selected bus, summing all phases. `bus_power(env)` returns `p_kw` and
+`q_kvar` with positive values for net import into the bus; it reverses the
+OpenDSS terminal convention. This is net exchange, not individual line loading.
+
+Rewards run after the executed power flow and before advancing to the next
+observation, using post-action voltages, angles and branch measurements.
+Single-phase and three-phase local objectives use all phases actually present.
+VUF requires phases a/b/c at the selected bus and uses both magnitudes and
+angles: `100 * abs(V_negative) / abs(V_positive)`.
+It raises `ValueError` for single/two-phase buses or undefined positive sequence.
+See the [EPRI unbalance discussion](https://opendss.epri.com/TechNoteNEMAUnbalanceCalculation.html).
+
+The module-level `minimize_cost` and `minimize_voltage_deviation` names remain
+available for existing callers. Without a selected bus, voltage deviation
+covers every bus and phase; the other local methods require a bus name.
 
 ---
 

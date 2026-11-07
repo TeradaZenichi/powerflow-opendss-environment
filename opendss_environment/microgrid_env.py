@@ -11,7 +11,7 @@ from opendss_environment.backend import OpenDSSDirectBackend
 from opendss_environment.actions import prepare_action
 from opendss_environment.data import load_data, episode_data
 from opendss_environment.states import build_named_observation, build_state
-from opendss_environment.rewards import minimize_cost
+from opendss_environment.rewards import Reward
 from opendss_environment.simulation import (
     _simulation_setup,
     _update_snapshot_powers,
@@ -27,7 +27,7 @@ class EnvironmentConfig:
     state_functions: tuple = ()
     num_episodes: int = 1
     start_episode: int = 0
-    reward_function: object = minimize_cost
+    reward_function: object = Reward.minimize_cost
     start_step: int = 0
 
     def __post_init__(self):
@@ -202,7 +202,8 @@ class MicrogridEnv(gym.Env):
         self.results.commit(pending.results)
         for name in ("idx", "current_cost", "episode_reward", "current_grid_kw", "current_grid_kvar",
                      "current_bus_snapshot", "current_bus_voltages_pu", "current_bus_angles_deg", "current_voltages_pu",
-                     "current_device_measurements", "current_branch_measurements", "previous_device_measurements"):
+                     "current_device_measurements", "current_branch_measurements", "previous_device_measurements",
+                     "pre_action_branch_measurements"):
             setattr(self, name, getattr(pending, name))
 
     def observe(self):

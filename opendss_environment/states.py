@@ -108,6 +108,7 @@ def build_named_observation(env):
         "dt_h": float(env.dt),
         "phase_order": list(_PHASE_NAME.values())[:env.data["phases"]],
         "buses": buses,
+        "branches": env.pre_action_branch_measurements,
         "grid": {
             "buy_price_per_kwh": price,
             "sell_price_per_kwh": price * env.data["feed_in_tariff_ratio"],
