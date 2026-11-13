@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+import numpy as np
 
 from .pv_droop import volt_var_kvar, volt_watt_limit_kw
 
@@ -101,13 +102,10 @@ class PV:
 
     def commit(self, pending):
         """Accept a complete, electrically solved operation from a private copy."""
-        self.array_kw[:] = pending.array_kw
-        self.array_kvar[:] = pending.array_kvar
+        for name in ('array_kw', 'array_kvar', 'array_p_net_kw', 'array_grid_consumption_kw', 'array_inverter_loss_kw'):
+            getattr(self, name)[:] = getattr(pending, name)
         self.array_phase_kw = pending.array_phase_kw
         self.array_phase_kvar = pending.array_phase_kvar
-        self.array_p_net_kw[:] = pending.array_p_net_kw
-        self.array_grid_consumption_kw[:] = pending.array_grid_consumption_kw
-        self.array_inverter_loss_kw[:] = pending.array_inverter_loss_kw
         self._control_request = pending._control_request
         self._phase_control_requests = pending._phase_control_requests
         self._phase_points = pending._phase_points
@@ -193,15 +191,11 @@ class BESS:
 
     def commit(self, pending):
         """Accept the energy state and histories only after a successful step."""
+        for name in ('array_soc', 'array_kw', 'array_kvar', 'array_charge_kw', 'array_discharge_kw', 'array_inverter_loss_kw'):
+            getattr(self, name)[:] = getattr(pending, name)
         self.soc = pending.soc
-        self.array_soc[:] = pending.array_soc
-        self.array_kw[:] = pending.array_kw
-        self.array_kvar[:] = pending.array_kvar
-        self.array_charge_kw[:] = pending.array_charge_kw
-        self.array_discharge_kw[:] = pending.array_discharge_kw
         self.array_phase_kw = pending.array_phase_kw
         self.array_phase_kvar = pending.array_phase_kvar
-        self.array_inverter_loss_kw[:] = pending.array_inverter_loss_kw
 
     def operate(self, p_bess, q_bess, dt):
         """Keep the total-command API using the same model as phase commands."""
@@ -305,6 +299,28 @@ class Results:
         self.phase_voltages = None
         self.phase_voltages_pu = None
         self.phase_angles_deg = None
+
+    def initialize_voltages(self, buses, steps):
+        self.voltages = {bus: np.zeros(steps) for bus in buses}
+        self.voltages_pu = {bus: np.zeros(steps) for bus in buses}
+        self.phase_voltages = {bus: {} for bus in buses}
+        self.phase_voltages_pu = {bus: {} for bus in buses}
+        self.phase_angles_deg = {bus: {} for bus in buses}
+
+    def record_voltages(self, snapshot, step):
+        """Store measured phase values and the legacy first-phase voltage."""
+        for bus in self.voltages:
+            steps = len(self.voltages[bus])
+            for history, measured in ((self.phase_voltages, snapshot.volts),
+                                      (self.phase_voltages_pu, snapshot.pu),
+                                      (self.phase_angles_deg, snapshot.angles)):
+                for phase, value in measured[bus].items():
+                    if phase not in history[bus]:
+                        history[bus][phase] = np.zeros(steps)
+                    history[bus][phase][step] = value
+            first_phase = next(iter(snapshot.pu[bus]))
+            self.voltages[bus][step] = snapshot.volts[bus][first_phase]
+            self.voltages_pu[bus][step] = snapshot.pu[bus][first_phase]
 
     def commit(self, pending):
         self.costs[:] = pending.costs

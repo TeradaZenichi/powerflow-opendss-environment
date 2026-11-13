@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field, replace
 import numpy as np
-from .devices_control import BESS_KVAR, BESS_KW, PV_KVAR, bess_control
 from .elements import PVPoint, PVRequest
 from .network import PHASE_NAME as _PHASE_NAME, device_phases as _device_phases
 
@@ -331,136 +330,133 @@ def _update_snapshot_powers(env, action=None):
     snapshot = _current_snapshot(env)
 
     for pv in env.pv_list:
-        available_kw = float(pv.profile[env.idx])
-        phases = _device_phases(pv, env.data["phases"])
-        element = DssDevice(env, pv, "Generator")
-        if pv.dispatch_mode == "aggregate":
-            voltage_pu = snapshot.device_average_pu(pv)
-            if action is None:
-                requested_generation_kw = available_kw
-                requested_q_kvar = float(PV_KVAR[env.idx])
-            else:
-                command = action.get("pv", {}).get(pv.id)
-                if command is None:
-                    raise ValueError(f"Missing action for PV {pv.id!r}")
-                requested_generation_kw = _aggregate(command["generation_kw"])
-                requested_q_kvar = _aggregate(command.get("q_injection_kvar", 0.0))
-            request = PVRequest(requested_generation_kw, requested_q_kvar, available_kw, voltage_pu)
-            p_pv, q_pv_injection = pv.apply(request)
-            pv._control_request = request
-            generation_by_phase = _phase_result(pv.array_kw[-1], phases, len(phases))
-            q_by_phase = _phase_result(q_pv_injection, phases, len(phases))
-            element.edit(p_pv, q_pv_injection)
-        else:
-            phase_available = {
-                phase: float(pv.phase_profiles[phase][env.idx])
-                for phase in phases
-            }
-            if action is None:
-                requested_generation = dict(phase_available)
-                requested_q = {
-                    phase: float(PV_KVAR[env.idx]) / len(phases)
-                    for phase in phases
-                }
-            else:
-                command = action.get("pv", {}).get(pv.id)
-                if command is None:
-                    raise ValueError(f"Missing action for PV {pv.id!r}")
-                command = PhaseAction(command, phases)
-                requested_generation = command.get("generation_kw")
-                requested_q = command.get("q_injection_kvar")
-            phase_points = {}
-            phase_requests = {}
-            for phase in phases:
-                voltage_pu = snapshot.device_pu(pv).get(phase)
-                request = PVRequest(
-                    requested_generation[phase], requested_q[phase], phase_available[phase],
-                    voltage_pu, 1.0 / len(phases)
-                )
-                point = pv.operating_point(request)
-                phase_points[phase] = point
-                phase_requests[phase] = request
-                element.edit(point.p_net_kw, point.q_injection_kvar, phase)
-            pv._phase_control_requests = phase_requests
-            pv._phase_points = phase_points
-            generation_by_phase = {
-                phase: point.generation_kw for phase, point in phase_points.items()
-            }
-            q_by_phase = {
-                phase: point.q_injection_kvar for phase, point in phase_points.items()
-            }
-            p_pv = sum(point.p_net_kw for point in phase_points.values())
-            q_pv_injection = sum(q_by_phase.values())
-            pv.array_kw.append(sum(generation_by_phase.values()))
-            pv.array_kvar.append(q_pv_injection)
-            pv.array_p_net_kw.append(p_pv)
-            pv.array_grid_consumption_kw.append(sum(point.grid_consumption_kw for point in phase_points.values()))
-            pv.array_inverter_loss_kw.append(sum(point.inverter_loss_kw for point in phase_points.values()))
-        generation_kw = pv.array_kw[-1]
-        inverter_loss_kw = pv.array_inverter_loss_kw[-1]
-        applied["pv"][pv.id] = {
-            "generation_kw": generation_by_phase,
-            "q_injection_kvar": q_by_phase,
-            "generation_total_kw": generation_kw,
-            "p_injection_total_kw": p_pv,
-            "q_injection_total_kvar": q_pv_injection,
-            "available_kw": available_kw,
-            "curtailment_kw": max(available_kw - generation_kw - inverter_loss_kw, 0.0),
-            "inverter_loss_kw": inverter_loss_kw,
-        }
-
+        applied["pv"][pv.id] = _apply_pv(env, pv, action, snapshot)
     for bess in env.bess_list:
-        soc_before_frac = bess.soc
-        phases = _device_phases(bess, env.data["phases"])
-        element = DssDevice(env, bess, "Load")
-        if bess.dispatch_mode == "aggregate":
-            if action is None:
-                p_bess, q_bess_injection = bess_control(bess, env.idx, env.dt, BESS_KW, BESS_KVAR)
-            else:
-                command = action.get("bess", {}).get(bess.id)
-                if command is None:
-                    raise ValueError(f"Missing action for BESS {bess.id!r}")
-                p_bess, q_bess_injection = bess.operate(
-                    _aggregate(command["p_net_kw"]),
-                    _aggregate(command.get("q_injection_kvar", 0.0)),
-                    env.dt,
-                )
-            p_by_phase = _phase_result(p_bess, phases, len(phases))
-            q_by_phase = _phase_result(q_bess_injection, phases, len(phases))
-            element.edit(p_bess, -q_bess_injection)
-        else:
-            if action is None:
-                p_request = {
-                    phase: float(BESS_KW[env.idx]) / len(phases)
-                    for phase in phases
-                }
-                q_request = {
-                    phase: float(BESS_KVAR[env.idx]) / len(phases)
-                    for phase in phases
-                }
-            else:
-                command = action.get("bess", {}).get(bess.id)
-                if command is None:
-                    raise ValueError(f"Missing action for BESS {bess.id!r}")
-                command = PhaseAction(command, phases)
-                p_request = command.get("p_net_kw")
-                q_request = command.get("q_injection_kvar")
-            p_by_phase, q_by_phase = bess.operate_phases(p_request, q_request, env.dt)
-            p_bess = sum(p_by_phase.values())
-            q_bess_injection = sum(q_by_phase.values())
-            for phase in phases:
-                element.edit(p_by_phase[phase], -q_by_phase[phase], phase)
-        applied["bess"][bess.id] = {
-            "p_net_kw": p_by_phase,
-            "q_injection_kvar": q_by_phase,
-            "p_net_total_kw": p_bess,
-            "q_injection_total_kvar": q_bess_injection,
-            "soc_before_frac": soc_before_frac,
-            "soc_after_frac": bess.soc,
-            "inverter_loss_kw": bess.array_inverter_loss_kw[-1],
-        }
+        applied["bess"][bess.id] = _apply_bess(env, bess, action)
 
     return applied
+
+
+def _device_command(action, kind, device):
+    command = action.get(kind, {}).get(device.id)
+    if command is None:
+        raise ValueError(f"Missing action for {kind.upper()} {device.id!r}")
+    return command
+
+
+def _apply_pv(env, pv, action, snapshot):
+    available_kw = float(pv.profile[env.idx])
+    phases = _device_phases(pv, env.data["phases"])
+    element = DssDevice(env, pv, "Generator")
+    if pv.dispatch_mode == "aggregate":
+        voltage_pu = snapshot.device_average_pu(pv)
+        if action is None:
+            requested_generation_kw = available_kw
+            requested_q_kvar = 0.0
+        else:
+            command = _device_command(action, "pv", pv)
+            requested_generation_kw = _aggregate(command["generation_kw"])
+            requested_q_kvar = _aggregate(command.get("q_injection_kvar", 0.0))
+        request = PVRequest(requested_generation_kw, requested_q_kvar, available_kw, voltage_pu)
+        p_pv, q_pv_injection = pv.apply(request)
+        pv._control_request = request
+        generation_by_phase = _phase_result(pv.array_kw[-1], phases, len(phases))
+        q_by_phase = _phase_result(q_pv_injection, phases, len(phases))
+        element.edit(p_pv, q_pv_injection)
+    else:
+        phase_available = {
+            phase: float(pv.phase_profiles[phase][env.idx])
+            for phase in phases
+        }
+        if action is None:
+            requested_generation = dict(phase_available)
+            requested_q = dict.fromkeys(phases, 0.0)
+        else:
+            command = _device_command(action, "pv", pv)
+            command = PhaseAction(command, phases)
+            requested_generation = command.get("generation_kw")
+            requested_q = command.get("q_injection_kvar")
+        phase_points = {}
+        phase_requests = {}
+        for phase in phases:
+            voltage_pu = snapshot.device_pu(pv).get(phase)
+            request = PVRequest(
+                requested_generation[phase], requested_q[phase], phase_available[phase],
+                voltage_pu, 1.0 / len(phases)
+            )
+            point = pv.operating_point(request)
+            phase_points[phase] = point
+            phase_requests[phase] = request
+            element.edit(point.p_net_kw, point.q_injection_kvar, phase)
+        pv._phase_control_requests = phase_requests
+        pv._phase_points = phase_points
+        generation_by_phase = {
+            phase: point.generation_kw for phase, point in phase_points.items()
+        }
+        q_by_phase = {
+            phase: point.q_injection_kvar for phase, point in phase_points.items()
+        }
+        p_pv = sum(point.p_net_kw for point in phase_points.values())
+        q_pv_injection = sum(q_by_phase.values())
+        pv.array_kw.append(sum(generation_by_phase.values()))
+        pv.array_kvar.append(q_pv_injection)
+        pv.array_p_net_kw.append(p_pv)
+        pv.array_grid_consumption_kw.append(sum(point.grid_consumption_kw for point in phase_points.values()))
+        pv.array_inverter_loss_kw.append(sum(point.inverter_loss_kw for point in phase_points.values()))
+    generation_kw = pv.array_kw[-1]
+    inverter_loss_kw = pv.array_inverter_loss_kw[-1]
+    return {
+        "generation_kw": generation_by_phase,
+        "q_injection_kvar": q_by_phase,
+        "generation_total_kw": generation_kw,
+        "p_injection_total_kw": p_pv,
+        "q_injection_total_kvar": q_pv_injection,
+        "available_kw": available_kw,
+        "curtailment_kw": max(available_kw - generation_kw - inverter_loss_kw, 0.0),
+        "inverter_loss_kw": inverter_loss_kw,
+    }
+
+
+def _apply_bess(env, bess, action):
+    soc_before_frac = bess.soc
+    phases = _device_phases(bess, env.data["phases"])
+    element = DssDevice(env, bess, "Load")
+    if bess.dispatch_mode == "aggregate":
+        if action is None:
+            p_bess, q_bess_injection = bess.operate(0.0, 0.0, env.dt)
+        else:
+            command = _device_command(action, "bess", bess)
+            p_bess, q_bess_injection = bess.operate(
+                _aggregate(command["p_net_kw"]),
+                _aggregate(command.get("q_injection_kvar", 0.0)),
+                env.dt,
+            )
+        p_by_phase = _phase_result(p_bess, phases, len(phases))
+        q_by_phase = _phase_result(q_bess_injection, phases, len(phases))
+        element.edit(p_bess, -q_bess_injection)
+    else:
+        if action is None:
+            p_request = dict.fromkeys(phases, 0.0)
+            q_request = dict.fromkeys(phases, 0.0)
+        else:
+            command = _device_command(action, "bess", bess)
+            command = PhaseAction(command, phases)
+            p_request = command.get("p_net_kw")
+            q_request = command.get("q_injection_kvar")
+        p_by_phase, q_by_phase = bess.operate_phases(p_request, q_request, env.dt)
+        p_bess = sum(p_by_phase.values())
+        q_bess_injection = sum(q_by_phase.values())
+        for phase in phases:
+            element.edit(p_by_phase[phase], -q_by_phase[phase], phase)
+    return {
+        "p_net_kw": p_by_phase,
+        "q_injection_kvar": q_by_phase,
+        "p_net_total_kw": p_bess,
+        "q_injection_total_kvar": q_bess_injection,
+        "soc_before_frac": soc_before_frac,
+        "soc_after_frac": bess.soc,
+        "inverter_loss_kw": bess.array_inverter_loss_kw[-1],
+    }
 
 
 @dataclass
@@ -560,14 +556,7 @@ def solve_power_flow(env, applied_action=None):
     snapshot = _solve_snapshot(env, controls)
     for control in controls:
         control.record(applied_action)
-    for bus in env.results.voltages:
-        for phase, value in snapshot.volts[bus].items():
-            env.results.phase_voltages[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = value
-            env.results.phase_voltages_pu[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = snapshot.pu[bus][phase]
-            env.results.phase_angles_deg[bus].setdefault(phase, np.zeros(env.steps))[env.idx] = snapshot.angles[bus][phase]
-        first_phase = next(iter(snapshot.pu[bus]))
-        env.results.voltages[bus][env.idx] = snapshot.volts[bus][first_phase]
-        env.results.voltages_pu[bus][env.idx] = snapshot.pu[bus][first_phase]
+    env.results.record_voltages(snapshot, env.idx)
 
     grid_kw = env.dss.circuit.total_power[0]
     grid_kvar = -env.dss.circuit.total_power[1]

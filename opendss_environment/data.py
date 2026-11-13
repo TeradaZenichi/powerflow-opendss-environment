@@ -2,7 +2,7 @@ import json
 import re
 import pandas as pd
 import numpy as np
-from .case_source import resolve_case_source, validate_case_config
+from pathlib import Path
 from .elements import BESS, BESSConfig, Grid, Load, PV, PVConfig, Results
 from .network import Network
 
@@ -15,6 +15,33 @@ _PHASE_NAME = {"1": "a", "2": "b", "3": "c"}
 def _normalize_phase(value):
     text = str(value).lower()
     return _PHASE_NAME.get(text, text)
+
+
+CASE_SCHEMA_VERSION = 1
+
+
+def resolve_case_source(source: str | Path) -> tuple[Path, Path]:
+    resolved = Path(source).expanduser().resolve()
+    if resolved.is_dir():
+        root = resolved
+        config_path = root / "config.json"
+    elif resolved.is_file():
+        root = resolved.parent
+        config_path = resolved
+    else:
+        raise FileNotFoundError(f"Case source not found: {resolved}")
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Case configuration not found: {config_path}")
+    return root, config_path
+
+
+def validate_case_config(config: dict) -> None:
+    version = config.get("schema_version", CASE_SCHEMA_VERSION)
+    if isinstance(version, bool) or version != CASE_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported case schema_version {version!r}; "
+            f"expected {CASE_SCHEMA_VERSION}"
+        )
 
 
 def load_data(path):
@@ -139,9 +166,7 @@ def load_data(path):
     }
 
 def episode_data(data, episode_idx, episode_steps):
-    """ 
-    Returns the data corresponding to one episode.
-    """
+    """Build devices and profiles for one episode."""
 
     episode_start = data.get("start_step", 0) + episode_idx * episode_steps
     episode_end = episode_start + episode_steps
@@ -151,27 +176,23 @@ def episode_data(data, episode_idx, episode_steps):
             f"Episode {episode_idx+1} with {episode_steps} steps exceeds total steps {data['steps']}"
         )
     
-    # bess
+    window = slice(episode_start, episode_end)
     bess_list = [BESS(BESSConfig(**values)) for values in data["devices"].get("bess", [])]
 
-    # grid
-    grid = Grid(data["prices"][episode_start:episode_end], data["sell_prices"][episode_start:episode_end])
+    grid = Grid(data["prices"][window], data["sell_prices"][window])
 
-    # pv
     pv_list = []
     for pv_data in data["devices"].get("pv", []):
-        profile = data["pv_profiles"][str(pv_data["id"])]
-        episode_profile = profile[episode_start:episode_end]
+        device_id = str(pv_data["id"])
+        profile = data["pv_profiles"][device_id][window]
 
         phase_profiles = {
-            phase: values[episode_start:episode_end]
-            for phase, values in data["pv_phase_profiles"].get(str(pv_data["id"]), {}).items()
+            phase: values[window]
+            for phase, values in data["pv_phase_profiles"].get(device_id, {}).items()
         }
-        config = {**pv_data, "profile": episode_profile, "phase_profiles": phase_profiles}
-        pv = PV(PVConfig(**config))
-        pv_list.append(pv)
+        config = {**pv_data, "profile": profile, "phase_profiles": phase_profiles}
+        pv_list.append(PV(PVConfig(**config)))
 
-    # load
     load_list = []
 
     for col in data["demand"].columns:
@@ -192,15 +213,15 @@ def episode_data(data, episode_idx, episode_steps):
             Load(
                 id=f"Load_{bus}" + (f"_{phase.lower()}" if phase else ""),
                 bus=bus,
-                array_kw=data["demand"][col].to_numpy()[episode_start:episode_end],
-                array_kvar=data["demand"][q_col].to_numpy()[episode_start:episode_end],
+                array_kw=data["demand"][col].to_numpy()[window],
+                array_kvar=data["demand"][q_col].to_numpy()[window],
                 phase_node=phase_node,
             )
         )
 
     return {
         "dt": data["dt"],
-        "timestamps": data["timestamps"].iloc[episode_start:episode_end].reset_index(drop=True),
+        "timestamps": data["timestamps"].iloc[window].reset_index(drop=True),
         "steps": episode_steps,
         "phases": data["phases"],
         "base_kv": data["base_kv"],

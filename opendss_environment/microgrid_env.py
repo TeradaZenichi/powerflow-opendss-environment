@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 import gymnasium as gym
-import numpy as np
 from pu_normalizer import PUNormalizer
 
 from opendss_environment.backend import OpenDSSDirectBackend
@@ -37,12 +36,11 @@ class EnvironmentConfig:
             or self.episode_steps < 1
         ):
             raise ValueError("episode_steps must be a positive integer or None for the complete case")
-        if isinstance(self.num_episodes, bool) or not isinstance(self.num_episodes, int) or self.num_episodes < 1:
-            raise ValueError("num_episodes must be a positive integer")
-        if isinstance(self.start_episode, bool) or not isinstance(self.start_episode, int) or self.start_episode < 0:
-            raise ValueError("start_episode must be a nonnegative integer")
-        if isinstance(self.start_step, bool) or not isinstance(self.start_step, int) or self.start_step < 0:
-            raise ValueError("start_step must be a nonnegative integer")
+        for name, minimum in (("num_episodes", 1), ("start_episode", 0), ("start_step", 0)):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                kind = "positive" if minimum else "nonnegative"
+                raise ValueError(f"{name} must be a {kind} integer")
 
 
 class MicrogridEnv(gym.Env):
@@ -72,11 +70,7 @@ class MicrogridEnv(gym.Env):
         self.normalizer = PUNormalizer(self.data["base_kva"], self.data["base_kv"])
 
         self.dss = OpenDSSDirectBackend()
-        self.current_cost = 0.0
-        self.current_device_measurements = {"bess": {}, "pv": {}}
-        self.current_branch_measurements = []
-        self.previous_device_measurements = {"bess": {}, "pv": {}}
-        self.episode_reward = 0.0
+        self._clear_episode_state()
         self._needs_reset = True
 
         self.load_episode_data(self.start_episode)
@@ -87,6 +81,14 @@ class MicrogridEnv(gym.Env):
 
         for name in ("dt", "steps", "timestamps", "grid", "bess_list", "pv_list", "load_list", "results"):
             setattr(self, name, episode[name])
+
+    def _clear_episode_state(self):
+        self.idx = 0
+        self.current_cost = 0.0
+        self.episode_reward = 0.0
+        self.current_device_measurements = {"bess": {}, "pv": {}}
+        self.previous_device_measurements = {"bess": {}, "pv": {}}
+        self.current_branch_measurements = []
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -99,20 +101,11 @@ class MicrogridEnv(gym.Env):
 
         self.load_episode_data(self.start_episode + episode_idx)
 
-        self.idx = 0
-        self.current_cost = 0.0
-        self.current_device_measurements = {"bess": {}, "pv": {}}
-        self.current_branch_measurements = []
-        self.previous_device_measurements = {"bess": {}, "pv": {}}
-        self.episode_reward = 0.0
+        self._clear_episode_state()
 
         _simulation_setup(self)
 
-        self.results.voltages = {bus: np.zeros(self.steps) for bus in self.dss.circuit.buses_names}
-        self.results.voltages_pu = {bus: np.zeros(self.steps) for bus in self.dss.circuit.buses_names}
-        self.results.phase_voltages = {bus: {} for bus in self.dss.circuit.buses_names}
-        self.results.phase_voltages_pu = {bus: {} for bus in self.dss.circuit.buses_names}
-        self.results.phase_angles_deg = {bus: {} for bus in self.dss.circuit.buses_names}
+        self.results.initialize_voltages(self.dss.circuit.buses_names, self.steps)
 
         prepare_pre_action_observation(self)
         self._needs_reset = False
@@ -163,7 +156,6 @@ class MicrogridEnv(gym.Env):
         self.idx += 1
 
         terminated = self.idx >= self.steps
-        truncated = False
 
         self.previous_device_measurements = self.current_device_measurements
         info = {
@@ -198,7 +190,7 @@ class MicrogridEnv(gym.Env):
 
         info = self.normalizer.normalize(info)
         self.normalizer.require_pu(info)
-        return state, reward, terminated, truncated, info
+        return state, reward, terminated, False, info
 
     def _commit_step(self, pending):
         for current, completed in zip(self.bess_list, pending.bess_list):

@@ -184,80 +184,10 @@ machine learning.
 
 # BESS and PV control
 
-Device operation is currently defined in:
-
-```text
-opendss_environment/devices_control.py
-```
-
-This file contains the control functions that determine the operating commands applied to the BESS and PV systems.
-
-When `step(None)` is used, the environment falls back to predefined time-series
-commands. `step(action)` accepts named commands supplied by an external
-controller.
-
-## BESS control
-
-The current BESS controller uses two predefined arrays:
-
-```python
-BESS_KW
-BESS_KVAR
-```
-
-At each time step, the corresponding active and reactive power commands are passed to:
-
-```python
-bess_control()
-```
-
-which calls:
-
-```python
-bess.operate(
-    bess_kw,
-    bess_kvar,
-    dt,
-)
-```
-
-The `operate()` method receives the requested powers and applies the device operational constraints, including power and energy limits.
-
-Therefore, the command requested by the controller may be adjusted by the BESS model to keep the device within its feasible operating range.
-
-The current implementation supports active and reactive BESS commands from
-either the baseline profiles or `step(action)`.
-
-## PV control
-
-The current PV controller uses a predefined reactive-power profile:
-
-```python
-PV_KVAR
-```
-
-The active power comes from the PV availability profile:
-
-```python
-pv.profile[idx]
-```
-
-and the command is applied through:
-
-```python
-pv_control()
-```
-
-which calls:
-
-```python
-pv.operate(
-    pv.profile[idx],
-    pv_kvar[idx],
-)
-```
-
-The `operate()` method applies the PV operating constraints before the resulting operating point is sent to OpenDSS.
+`step(None)` uses idle BESS commands (P=Q=0) and requests the available PV
+power with Q=0. Device limits and configured PV controls still apply.
+These defaults work for any episode length; no fixed dispatch arrays are used.
+Use `step(action)` to supply commands from a controller.
 
 When `control` is `volt-var`, `volt-watt`, or `volt-var-watt`, the
 environment evaluates the same local curves used by the three-phase teacher.
@@ -271,8 +201,7 @@ equivalent.
 
 ## External device control
 
-The predefined control remains a baseline. An external controller or machine
-learning agent can provide named device actions at each time step.
+An external controller or learning agent can provide named device actions at each time step.
 
 The intended action space includes:
 
@@ -536,8 +465,8 @@ At each `step(action)`, the environment:
 An episode terminates when the number of simulated steps reaches `EPISODE_STEPS`.
 
 When `action` is provided, it determines BESS and PV operation. With
-`action=None`, the predefined profiles in `devices_control.py` are used as the
-baseline.
+`action=None`, BESS requests zero P/Q and PV requests available generation with
+zero Q, subject to configured device controls and limits.
 
 ## States
 
@@ -663,7 +592,13 @@ opendss_environment/results_scripts/
 The main results interface is:
 
 ```python
-simulation_results(results, CASE_PATH)
+from pathlib import Path
+from opendss_environment.results_scripts.plots import save_plots
+from opendss_environment.results_scripts.summary import save_summary
+
+output = Path("outputs") / CASE_PATH.name
+save_plots(results, output / "plots")
+save_summary(results, output / "summary")
 ```
 
 called after an episode has finished.
@@ -767,20 +702,26 @@ opendss_environment/
 │   ├── __init__.py               Public environment and action classes.
 │   ├── actions.py                Total and per-phase actions and validation.
 │   ├── backend.py                OpenDSSDirect adapter.
-│   ├── case_source.py            External case paths and schema validation.
-│   ├── contracts.py              Observation schema version.
-│   ├── data.py                   Case loading and episode data.
-│   ├── devices_control.py        Reference control profiles.
+│   ├── data.py                   Case paths, schema validation, loading and episode data.
 │   ├── elements.py               BESS, PV, load, grid and result classes.
 │   ├── microgrid_env.py          EnvironmentConfig and MicrogridEnv implementation.
 │   ├── network.py                Physical network representation.
 │   ├── pv_droop.py               PV control curves.
 │   ├── rewards.py                Reward functions.
 │   ├── simulation.py             Electrical simulation and measurements.
-│   ├── states.py                 Observation construction.
+│   ├── states.py                 Observation construction and schema version.
 │   └── results_scripts/          Plots and simulation reports.
 ├── examples/                     Example scenario data.
 ├── tests/                        Physical and API checks.
 ├── pyproject.toml                Package installation settings.
 └── Readme.md
 ```
+
+## Module consolidation
+
+Case path and schema helpers now live in `opendss_environment.data`.
+The observation version remains available as
+`from opendss_environment import OBSERVATION_SCHEMA_VERSION`.
+Use `save_plots` and `save_summary` directly instead of `simulation_results`.
+The former `case_source`, `contracts` and `results_scripts.results` import paths
+were removed; consumers importing those modules must update their imports.

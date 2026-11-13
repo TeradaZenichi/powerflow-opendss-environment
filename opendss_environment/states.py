@@ -1,7 +1,9 @@
 import numpy as np
 
-from .contracts import OBSERVATION_SCHEMA_VERSION
 from .network import PHASE_NAME as _PHASE_NAME, device_phases as _phase_names
+
+
+OBSERVATION_SCHEMA_VERSION = 2
 
 
 def _phase_values(values, phases):

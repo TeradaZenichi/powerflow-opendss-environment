@@ -1,361 +1,113 @@
-'''
-Plots sim_results from the simulation and saves them to the specified output directory.
-The plots include:
-- Active power flow (load, PV generation, BESS, and grid)
-- Bus voltage magnitudes
-- Bus voltage magnitudes in per unit (pu)
-- Hourly energy costs
-- BESS energy and SoC plots
-- Prices vs Grid Import plot
-'''
+"""Export electrical and energy plots for a complete simulation episode."""
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
 
-def save_plots(sim_results, output_dir):
+
+def save_plots(results, output_dir):
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    _plot_power(results, output_dir, reactive=False)
+    _plot_power(results, output_dir, reactive=True)
+    _plot_voltages(results, output_dir, per_unit=False)
+    _plot_voltages(results, output_dir, per_unit=True)
+    _plot_costs(results, output_dir)
+    _plot_battery(results, output_dir, energy=True)
+    _plot_battery(results, output_dir, energy=False)
+    _plot_price_grid_import(results, output_dir)
 
-    _plot_power_flow(sim_results, output_dir)
-    _plot_reactive_power(sim_results, output_dir)
-    _plot_bus_voltages(sim_results, output_dir)
-    _plot_bus_voltages_pu(sim_results, output_dir)
-    _plot_hourly_costs(sim_results, output_dir)
-    _plot_bess_energy_level(sim_results, output_dir)
-    _plot_bess_soc(sim_results, output_dir)
-    _plot_price_grid_import(sim_results, output_dir)
+
+def _figure(results, title, ylabel):
+    hours = np.arange(results["steps"]) * results["dt"]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.set(title=title, xlabel="Elapsed time [h]", ylabel=ylabel)
+    ax.set_xlim(-results["dt"] / 2, hours[-1] + results["dt"] / 2)
+    ax.grid(color="lightgrey")
+    ax.set_axisbelow(True)
+    return fig, ax, hours
+
+
+def _save(fig, ax, path):
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, loc="best")
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def _total(devices, field, steps):
+    return sum((np.asarray(getattr(device, field)) for device in devices), np.zeros(steps))
+
 
 def _stack_bottoms(*series):
-       '''
-       Calculates the bottom positions for stacked bar plots, 
-       ensuring that positive and negative values are stacked separately.
-       '''
-       data = np.vstack(series)
-
-       pos = np.maximum(data, 0) # Takes the positive values of the data
-       neg = np.minimum(data, 0) # Takes the negative values of the data
-
-       # Calculate the cumulative sum for positive and negative values separately
-       pos_bottom = np.vstack([np.zeros(data.shape[1]), np.cumsum(pos, axis=0)[:-1]])
-       neg_bottom = np.vstack([np.zeros(data.shape[1]), np.cumsum(neg, axis=0)[:-1]])
-
-       # If the original data is positive, use the positive bottom; otherwise, use the negative bottom
-       return np.where(data >= 0, pos_bottom, neg_bottom)
-
-
-def _plot_power_flow(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       dt = sim_results["dt"]
-       grid = sim_results["grid"]
-       bess_list = sim_results["bess_list"]
-       pv_list = sim_results["pv_list"]
-       load_list = sim_results["load_list"]
-
-       pv_kw = np.sum([pv.array_kw for pv in pv_list], axis=0)
-       load_kw = np.sum([load.array_kw for load in load_list], axis=0)
-       bess_kw = np.sum([bess.array_kw for bess in bess_list], axis = 0)
-       grid_kw = -np.array(grid.array_kw)
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.axhline(0, color="k", linestyle="-.")
-       ax.grid(color="lightgrey")
-
-       ax.plot(hours, load_kw,
-              color="k",
-              marker="o",
-              label="Load")
-
-       series = [pv_kw, grid_kw, bess_kw]
-       bottoms = _stack_bottoms(*series)
-
-       colors = ["gold", "hotpink", "blueviolet"]
-       labels = ["PV Generation", "Grid", "BESS"]
-
-       for y, bottom, color, label in zip(series, bottoms, colors, labels):
-              ax.bar(hours, y, width=0.9*dt, bottom=bottom, color=color, label=label)
-
-       ax.set_title("Active power")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("Power [kW]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)       
-       ax.legend(loc="upper right")
-       ax.set_axisbelow(True)
-
-       plt.tight_layout()
-       plt.savefig(output_dir / "power_flow_plot.png")
-
-def _plot_reactive_power(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       dt = sim_results["dt"]
-       grid = sim_results["grid"]
-       bess_list = sim_results["bess_list"]
-       pv_list = sim_results["pv_list"]
-       load_list = sim_results["load_list"]
-
-       pv_kvar = np.sum([pv.array_kvar for pv in pv_list], axis=0)
-       load_kvar = np.sum([load.array_kvar for load in load_list], axis=0)
-       bess_kvar = np.sum([bess.array_kvar for bess in bess_list], axis = 0)
-       grid_kvar = np.array(grid.array_kvar)
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.axhline(0, color="k", linestyle="-.")
-       ax.grid(color="lightgrey")
-
-       ax.plot(hours, load_kvar,
-              color="k",
-              marker="o",
-              label="Load")
-
-       series = [pv_kvar, grid_kvar, bess_kvar]
-       bottoms = _stack_bottoms(*series)
-
-       colors = ["gold", "hotpink", "blueviolet"]
-       labels = ["PV Generation", "Grid", "BESS"]
-
-       for y, bottom, color, label in zip(series, bottoms, colors, labels):
-              ax.bar(hours, y, width=0.9*dt, bottom=bottom, color=color, label=label)
-
-       ax.set_title("Reactive power")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("Reactive power [kvar]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)       
-       ax.legend(loc="upper right")
-       ax.set_axisbelow(True)
-
-       plt.tight_layout()
-       plt.savefig(output_dir / "power_reactive_plot.png")
-
-def _plot_bus_voltages(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       voltages = {f"{bus}/{phase}": values for bus, phases in sim_results["results"].phase_voltages.items()
-                   for phase, values in phases.items()}
-       dt = sim_results["dt"]
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.grid(color="lightgrey")
-
-       for bus, voltage in voltages.items():
-              ax.plot(
-              hours,
-              voltage,
-              marker="o",
-              linewidth=2,
-              label=bus
-              )
-
-       ax.set_title("Bus voltage magnitude")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("Voltage [V]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
-
-       ax.legend(loc="best")
-       ax.set_axisbelow(True)
-
-       plot_file = output_dir / "bus_voltage_plot.png"
-       plt.tight_layout()
-       plt.savefig(plot_file)
-       plt.close(fig)
-
-def _plot_bus_voltages_pu(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       voltages = {f"{bus}/{phase}": values for bus, phases in sim_results["results"].phase_voltages_pu.items()
-                   for phase, values in phases.items()}
-       dt = sim_results["dt"]
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.grid(color="lightgrey")
-
-       for bus, voltage in voltages.items():
-              ax.plot(
-              hours,
-              voltage,
-              marker="o",
-              linewidth=2,
-              label=bus
-              )
-
-       ax.set_title("Bus voltage magnitude")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("Voltage [pu]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
-
-       ax.legend(loc="best")
-       ax.set_axisbelow(True)
-
-       plot_file = output_dir / "bus_voltage_pu_plot.png"
-       plt.tight_layout()
-       plt.savefig(plot_file)
-       plt.close(fig)
-
-def _plot_hourly_costs(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       costs = sim_results["results"].costs
-       dt = sim_results["dt"]
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.grid(color="lightgrey")
-
-       ax.bar(
-              hours,
-              costs,
-              color="hotpink",
-              edgecolor="black"
-       )
-
-       ax.set_title("Hourly energy cost")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("Cost [$]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)   
-
-       ax.set_axisbelow(True)
-
-       plot_file = output_dir / "hourly_cost_plot.png"
-       plt.tight_layout()
-       plt.savefig(plot_file)
-       plt.close(fig)
-
-def _plot_bess_energy_level(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       bess_list = sim_results["bess_list"]
-       dt = sim_results["dt"]
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.grid(color="lightgrey")
-
-       for bess in bess_list:
-              energy = np.array(bess.array_soc) * bess.e_cap_kwh
-
-              ax.plot(
-                     hours,
-                     energy,
-                     marker="o",
-                     linewidth=2,
-                     label=f"BESS {bess.id}"
-        )
-
-       ax.set_title("Battery Energy Level")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("Energy [kWh]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
-
-       ax.legend(loc="best")
-       ax.set_axisbelow(True)
-
-       plot_file = output_dir / "bess_energy_plot.png"
-       plt.tight_layout()
-       plt.savefig(plot_file)
-       plt.close(fig)
-
-def _plot_bess_soc(sim_results, output_dir):
-
-       steps = sim_results["steps"]
-       bess_list = sim_results["bess_list"]
-       dt = sim_results["dt"]
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-
-       fig, ax = plt.subplots(figsize=(10, 5))
-
-       ax.grid(color="lightgrey")
-
-       for bess in bess_list:
-              soc = np.array(bess.array_soc) * 100
-
-              ax.plot(
-                     hours,
-                     soc,
-                     marker="o",
-                     linewidth=2,
-                     label=f"BESS {bess.id}"
-        )
-
-       ax.set_title("Battery SoC Level")
-       ax.set_xlabel("Time [h]")
-       ax.set_ylabel("SoC [%]")
-
-       ax.set_xticks(hours[::int(1/dt)])
-       ax.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)    
-
-       ax.legend(loc="best")
-       ax.set_axisbelow(True)
-
-       plot_file = output_dir / "bess_soc_plot.png"
-       plt.tight_layout()
-       plt.savefig(plot_file)
-       plt.close(fig)
-
-def _plot_price_grid_import(sim_results, output_dir):
-
-       prices = sim_results["grid"].prices
-       grid_kw = -np.array(sim_results["grid"].array_kw)
-       steps = sim_results["steps"]
-       dt = sim_results["dt"]
-
-       hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
-       grid_kwh = grid_kw * dt
-
-       fig, ax1 = plt.subplots(figsize=(10, 5))
-       ax2 = ax1.twinx()
-
-       ax1.grid(color="lightgrey")
-
-       ax1.step(hours, prices, where="post", color="dodgerblue", linewidth=2, label="Electricity Price")
-       ax2.step(hours, grid_kwh, where="post", color="hotpink", linewidth=2, label="Grid Import")
-
-       ax1.set_title("Electricity Price and Grid Import")
-       ax1.set_xlabel("Time [h]")
-       ax1.set_ylabel("Price [$]")
-       ax2.set_ylabel("Imported Energy [kWh]")
-
-       ax1.set_xticks(hours[::int(1/dt)])
-       ax1.set_xlim(hours[0] - dt/2, hours[-1] + dt/2)
-
-       lines1, labels1 = ax1.get_legend_handles_labels()
-       lines2, labels2 = ax2.get_legend_handles_labels()
-       ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
-
-       ax1.set_axisbelow(True)
-
-       plot_file = output_dir / "price_grid_import_plot.png"
-       plt.tight_layout()
-       plt.savefig(plot_file)
-       plt.close(fig)
+    """Stack positive and negative powers on their respective sides of zero."""
+    data = np.vstack(series)
+    positive = np.maximum(data, 0)
+    negative = np.minimum(data, 0)
+    return np.where(data >= 0, np.cumsum(positive, axis=0) - positive,
+                    np.cumsum(negative, axis=0) - negative)
+
+
+def _plot_power(results, output_dir, reactive):
+    field = "array_kvar" if reactive else "array_kw"
+    unit = "kvar" if reactive else "kW"
+    title = "Reactive power" if reactive else "Active power"
+    filename = "power_reactive_plot.png" if reactive else "power_flow_plot.png"
+    fig, ax, hours = _figure(results, title, f"Power [{unit}]")
+    load = _total(results["load_list"], field, results["steps"])
+    pv = _total(results["pv_list"], field, results["steps"])
+    bess = _total(results["bess_list"], field, results["steps"])
+    grid = np.asarray(getattr(results["grid"], field)) * (1 if reactive else -1)
+    ax.axhline(0, color="black", linestyle="-.")
+    ax.plot(hours, load, color="black", label="Load")
+    series = (pv, grid, bess)
+    for values, bottom, color, label in zip(series, _stack_bottoms(*series),
+                                            ("gold", "hotpink", "blueviolet"), ("PV", "Grid", "BESS")):
+        ax.bar(hours, values, width=0.9 * results["dt"], bottom=bottom, color=color, label=label)
+    _save(fig, ax, output_dir / filename)
+
+
+def _plot_voltages(results, output_dir, per_unit):
+    field = "phase_voltages_pu" if per_unit else "phase_voltages"
+    unit = "pu" if per_unit else "V"
+    filename = "bus_voltage_pu_plot.png" if per_unit else "bus_voltage_plot.png"
+    fig, ax, hours = _figure(results, "Bus voltage magnitude", f"Voltage [{unit}]")
+    for bus, phases in getattr(results["results"], field).items():
+        for phase, values in phases.items():
+            ax.plot(hours, values, linewidth=1, label=f"{bus}/{phase}")
+    _save(fig, ax, output_dir / filename)
+
+
+def _plot_costs(results, output_dir):
+    fig, ax, hours = _figure(results, "Energy cost per interval", "Cost [currency units]")
+    ax.bar(hours, results["results"].costs, width=0.9 * results["dt"], color="hotpink")
+    _save(fig, ax, output_dir / "hourly_cost_plot.png")
+
+
+def _plot_battery(results, output_dir, energy):
+    title = "Battery energy" if energy else "Battery state of charge"
+    unit = "kWh" if energy else "%"
+    filename = "bess_energy_plot.png" if energy else "bess_soc_plot.png"
+    fig, ax, hours = _figure(results, title, f"{title} [{unit}]")
+    for bess in results["bess_list"]:
+        values = np.asarray(bess.array_soc) * (bess.e_cap_kwh if energy else 100)
+        ax.plot(hours, values, label=f"BESS {bess.id}")
+    if not results["bess_list"]:
+        ax.text(0.5, 0.5, "No BESS in this scenario", ha="center", transform=ax.transAxes)
+    _save(fig, ax, output_dir / filename)
+
+
+def _plot_price_grid_import(results, output_dir):
+    fig, ax, hours = _figure(results, "Electricity price and net grid import", "Price [currency/kWh]")
+    energy_axis = ax.twinx()
+    energy = -np.asarray(results["grid"].array_kw) * results["dt"]
+    price_line, = ax.step(hours, results["grid"].prices, where="post", color="dodgerblue", label="Price")
+    energy_line, = energy_axis.step(hours, energy, where="post", color="hotpink", label="Net grid import")
+    energy_axis.set_ylabel("Net imported energy per interval [kWh]")
+    energy_axis.legend(handles=[price_line, energy_line], loc="upper right")
+    price_line.set_label("_nolegend_")
+    _save(fig, ax, output_dir / "price_grid_import_plot.png")

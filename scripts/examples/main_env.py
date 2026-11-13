@@ -1,44 +1,38 @@
+"""Run a configured case and export the last episode."""
 from pathlib import Path
-from opendss_environment.microgrid_env import EnvironmentConfig, MicrogridEnv
-from opendss_environment.rewards import minimize_cost
-from opendss_environment.results_scripts.results import simulation_results
+
+from opendss_environment import EnvironmentConfig, MicrogridEnv
+from opendss_environment.results_scripts.plots import save_plots
+from opendss_environment.results_scripts.summary import save_summary
+
+
+CASE_PATH = Path(__file__).resolve().parents[2] / "examples" / "case123"
+EPISODE_STEPS = 24
+NUM_EPISODES = 1
+START_EPISODE = 0
+OUTPUT = Path(__file__).resolve().parents[2] / "outputs" / CASE_PATH.name
+
+
+def main():
+    env = MicrogridEnv(EnvironmentConfig(
+        CASE_PATH, episode_steps=EPISODE_STEPS,
+        num_episodes=NUM_EPISODES, start_episode=START_EPISODE,
+    ))
+    episode_rewards = []
+    for episode_idx in range(NUM_EPISODES):
+        env.reset(options={"episode_idx": episode_idx})
+        for _ in range(env.steps):
+            _, _, terminated, truncated, _ = env.step(None)
+            if terminated or truncated:
+                break
+        results = env.get_episode_results()
+        episode_rewards.append(results["episode_reward"])
+        print(f"Episode {episode_idx + 1} reward: {results['episode_reward']}")
+    save_plots(results, OUTPUT / "plots")
+    save_summary(results, OUTPUT / "summary")
+    print(f"Results: {OUTPUT.resolve()}")
+    return episode_rewards
+
 
 if __name__ == "__main__":
-
-    project_dir = Path(__file__).resolve().parents[2]
-    CASE_PATH = project_dir / "examples" / "case123"
-
-    EPISODE_STEPS = 24
-    NUM_EPISODES = 1
-    START_EPISODE = 0
-
-    config = EnvironmentConfig(
-        case_path=CASE_PATH,
-        episode_steps=EPISODE_STEPS,
-        num_episodes=NUM_EPISODES,
-        start_episode=START_EPISODE,
-        reward_function=minimize_cost,
-    )
-    env = MicrogridEnv(config)
-
-    episode_rewards = []
-
-    for episode_idx in range(env.num_episodes):
-
-        observation, info = env.reset(options={"episode_idx": episode_idx})
-
-        terminated = False
-        while not terminated:
-            # Fixed control for now
-            action = None
-            observation, reward, terminated, truncated, info = env.step(action)
-
-        results = env.get_episode_results()
-
-        episode_reward = results["episode_reward"]
-        episode_rewards.append(episode_reward)
-
-        print(f"Episode {episode_idx + 1} total reward ({env.reward_function.__name__}): {episode_reward}")
-
-        if episode_idx == env.num_episodes - 1:
-            simulation_results(results, CASE_PATH)
+    main()

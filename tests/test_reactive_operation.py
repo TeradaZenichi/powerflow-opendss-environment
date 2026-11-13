@@ -13,15 +13,9 @@ from opendss_environment.data import (
     episode_data,
     get_dt_hours,
     load_data,
+    validate_case_config,
 )
-from opendss_environment.case_source import validate_case_config
-from opendss_environment.devices_control import (
-    BESS_KVAR,
-    BESS_KW,
-    PV_KVAR,
-    bess_control,
-    pv_control,
-)
+
 from opendss_environment.elements import BESS, PV, BESSConfig, PVConfig, PVRequest
 from opendss_environment.microgrid_env import EnvironmentConfig, MicrogridEnv
 from opendss_environment.simulation import (
@@ -106,39 +100,25 @@ class ReactiveOperationTest(unittest.TestCase):
         self.assertAlmostEqual(bess.soc, 0.7818)
         self.assertLessEqual(math.hypot(p_bess, q_bess), bess.s_max_kva)
 
-    def test_reference_controls_reproduce_teacher_reactive_profiles(self):
-        data, episode = self.episode()
-        bess = episode["bess_list"][0]
-        pv = episode["pv_list"][0]
-
-        for idx in range(data["steps"]):
-            bess_control(bess, idx, data["dt"], BESS_KW, BESS_KVAR)
-            pv_control(pv, idx, PV_KVAR)
-
-        self.assertAlmostEqual(bess.soc, bess.soc_init_frac, places=5)
-        self.assertGreater(max(bess.array_kvar), 25.0)
-        self.assertGreater(max(pv.array_kvar), 49.0)
-        self.assertTrue(all(
-            math.hypot(p, q) <= bess.s_max_kva + 1e-9
-            for p, q in zip(bess.array_kw, bess.array_kvar)
-        ))
-        self.assertTrue(all(
-            math.hypot(p, q) <= pv.s_max_kva + 1e-9
-            for p, q in zip(pv.array_p_net_kw, pv.array_kvar)
-        ))
-        self.assertTrue(all(
-            q == 0.0
-            for available, q in zip(pv.profile, pv.array_kvar)
-            if available <= 0.0
-        ))
-        self.assertTrue(all(
-            generation + loss <= available + 1e-9
-            for generation, loss, available in zip(
-                pv.array_kw,
-                pv.array_inverter_loss_kw,
-                pv.profile,
-            )
-        ))
+    def test_default_action_matches_idle_bess_and_available_pv(self):
+        for case in (CASE_PATH, PER_PHASE_CASE):
+            with self.subTest(case=case):
+                env = MicrogridEnv(EnvironmentConfig(case, 2))
+                observation, _ = env.reset()
+                defaults = [env.step(None) for _ in range(2)]
+                observation, _ = env.reset()
+                for expected in defaults:
+                    action = {
+                        "bess": {key: {"p_net_pu": 0.0, "q_injection_pu": 0.0}
+                                 for key in observation["bess"]},
+                        "pv": {key: {"generation_pu": values["available_pu"], "q_injection_pu": 0.0}
+                               for key, values in observation["pv"].items()},
+                    }
+                    observation, reward, terminated, truncated, info = env.step(action)
+                    self.assertEqual(observation, expected[0])
+                    self.assertEqual((reward, terminated, truncated), expected[1:4])
+                    self.assertEqual(info["executed_action"], expected[4]["executed_action"])
+                    self.assertEqual(env.bess_list[0].soc, env.bess_list[0].soc_init_frac)
 
     def test_pv_applies_volt_var_and_volt_watt_curves(self):
         common = {
@@ -194,7 +174,10 @@ class ReactiveOperationTest(unittest.TestCase):
 
     def test_bess_q_sign_is_converted_only_at_opendss_boundary(self):
         env = self.fake_env()
-        _update_snapshot_powers(env)
+        _update_snapshot_powers(env, {
+            "bess": {"b1": {"p_net_kw": 0.0, "q_injection_kvar": 9.364064}},
+            "pv": {"pv1": {"generation_kw": 0.0}},
+        })
 
         bess_command = next(
             command for command in env.dss.commands if "Edit Load.b1" in command
@@ -207,7 +190,11 @@ class ReactiveOperationTest(unittest.TestCase):
 
         for idx in range(7):
             env.idx = idx
-            _update_snapshot_powers(env)
+            _update_snapshot_powers(env, {
+                "bess": {"b1": {"p_net_kw": 0.0}},
+                "pv": {"pv1": {"generation_kw": float(env.pv_list[0].profile[idx]),
+                               "q_injection_kvar": 27.09902}},
+            })
 
         pv_commands = [
             command for command in env.dss.commands if "Edit Generator.pv1" in command
