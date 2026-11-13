@@ -19,6 +19,9 @@ The Python package is `opendss_environment`, installed as the distribution
 from opendss_environment import Action, EnvironmentConfig, MicrogridEnv, TotalAction
 ```
 
+See [profiles, tariffs, diagnostics and the RL adapter](docs/control-api.md)
+for multi-device and three-phase experiments.
+
 Version 0.5 replaces the old `microgrid_env` and `opendss_env` import paths.
 After migrating an existing environment, uninstall the previous distribution
 and install the renamed project:
@@ -598,7 +601,8 @@ The state definition is configurable, allowing different observation spaces to b
 `Reward` in `opendss_environment/rewards.py` groups the cost reward and optional
 local objectives. The environment still defaults to `Reward.minimize_cost`:
 negative executed grid cost, with import billed at the buy price and export
-credited according to `grid.feed_in_tariff_ratio`.
+credited at `sell_price_per_kwh` when present in the price CSV. Otherwise,
+the sell price is the buy price times `grid.feed_in_tariff_ratio`.
 
 ```python
 from opendss_environment import EnvironmentConfig, MicrogridEnv, Reward

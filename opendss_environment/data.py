@@ -35,6 +35,10 @@ def load_data(path):
     price_frame = pd.read_csv(price_path, parse_dates=["timestamp"])
     price_frame = price_frame.sort_values("timestamp").reset_index(drop=True)
     prices = price_frame["price_per_kwh"].to_numpy()
+    ratio = float(cfg.get("grid", {}).get("feed_in_tariff_ratio", 1.0))
+    sell_prices = price_frame["sell_price_per_kwh"].to_numpy() if "sell_price_per_kwh" in price_frame else prices * ratio
+    if not np.isfinite(prices).all() or not np.isfinite(sell_prices).all():
+        raise ValueError("Buy and sell prices must be finite")
 
     base_kv = cfg["base"]["v_base_kv"]
     base_kva = cfg["base"]["s_base_kva"]
@@ -70,31 +74,24 @@ def load_data(path):
     pv_profiles = {}
     pv_phase_profiles = {}
     profile_timestamps = []
+    profile_frames = {}
+
+    def profile_values(reference):
+        filename, column = reference.split(":", 1)
+        if filename not in profile_frames:
+            frame = pd.read_csv(path / filename, parse_dates=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+            profile_frames[filename] = frame
+            profile_timestamps.append((f"PV profile {filename}", frame["timestamp"]))
+        return profile_frames[filename][column].to_numpy(copy=True)
 
     for pv_data in devices.get("pv", []):
-        profile_file, profile_col = pv_data["profile"].split(":")
-
-        profile_frame = pd.read_csv(
-            path / profile_file, parse_dates=["timestamp"]
-        ).sort_values("timestamp").reset_index(drop=True)
-        pv_profiles[profile_col] = profile_frame[profile_col].to_numpy()
-        profile_timestamps.append(
-            (f"PV profile {profile_file}:{profile_col}", profile_frame["timestamp"])
-        )
-        phase_profiles = {}
-        for phase, reference in pv_data.get("phase_profiles", {}).items():
-            phase_file, phase_col = reference.split(":")
-            phase_frame = pd.read_csv(
-                path / phase_file, parse_dates=["timestamp"]
-            ).sort_values("timestamp").reset_index(drop=True)
-            phase_profiles[_normalize_phase(phase)] = phase_frame[phase_col].to_numpy()
-            profile_timestamps.append(
-                (f"PV phase profile {phase_file}:{phase_col}", phase_frame["timestamp"])
-            )
+        pv_profiles[str(pv_data["id"])] = profile_values(pv_data["profile"])
+        phase_profiles = {_normalize_phase(phase): profile_values(reference)
+                          for phase, reference in pv_data.get("phase_profiles", {}).items()}
         if phase_profiles:
             phase_sum = sum(phase_profiles.values())
             if not np.allclose(
-                phase_sum, pv_profiles[profile_col], rtol=0.0, atol=1e-9
+                phase_sum, pv_profiles[str(pv_data["id"])], rtol=0.0, atol=1e-9
             ):
                 raise ValueError(
                     f"PV {pv_data['id']!r} phase profiles must sum to its total profile"
@@ -133,6 +130,9 @@ def load_data(path):
         "pv_phase_profiles": pv_phase_profiles,
         "demand": demand,
         "prices": prices,
+        "sell_prices": sell_prices,
+        "voltage_limits": cfg.get("voltage_limits", {}),
+        "grid_limits": cfg.get("grid", {}),
         "feed_in_tariff_ratio": float(
             cfg.get("grid", {}).get("feed_in_tariff_ratio", 1.0)
         ),
@@ -155,13 +155,12 @@ def episode_data(data, episode_idx, episode_steps):
     bess_list = [BESS(BESSConfig(**values)) for values in data["devices"].get("bess", [])]
 
     # grid
-    grid = Grid(data["prices"][episode_start:episode_end])
+    grid = Grid(data["prices"][episode_start:episode_end], data["sell_prices"][episode_start:episode_end])
 
     # pv
     pv_list = []
     for pv_data in data["devices"].get("pv", []):
-        profile_id = pv_data["profile"].split(":",1)[1]
-        profile = data["pv_profiles"][profile_id]
+        profile = data["pv_profiles"][str(pv_data["id"])]
         episode_profile = profile[episode_start:episode_end]
 
         phase_profiles = {

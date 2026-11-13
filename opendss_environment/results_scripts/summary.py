@@ -24,9 +24,9 @@ def save_summary(sim_results, output_dir):
     costs = np.asarray(sim_results["results"].costs)
     voltages_pu = sim_results["results"].voltages_pu
 
-    pv_kw = np.sum([pv.array_kw for pv in pv_list], axis=0)
-    load_kw = np.sum([load.array_kw for load in load_list], axis=0)
-    load_kvar = np.sum([load.array_kvar for load in load_list], axis=0)
+    pv_kw = sum((np.asarray(pv.array_kw) for pv in pv_list), np.zeros(steps))
+    load_kw = sum((np.asarray(load.array_kw) for load in load_list), np.zeros(steps))
+    load_kvar = sum((np.asarray(load.array_kvar) for load in load_list), np.zeros(steps))
     grid_kw = -np.asarray(grid.array_kw)
 
     load_energy = np.sum(load_kw) * dt
@@ -40,9 +40,8 @@ def save_summary(sim_results, output_dir):
     bess_reactive_loss_energy = 0
 
     for bess in bess_list:
-        p = np.asarray(bess.array_kw)
-        bess_charge_energy += np.sum(p[p > 0]) * dt
-        bess_discharge_energy += np.sum(-p[p < 0]) * dt
+        bess_charge_energy += np.sum(bess.array_charge_kw) * dt
+        bess_discharge_energy += np.sum(bess.array_discharge_kw) * dt
         bess_reactive_loss_energy += np.sum(bess.array_inverter_loss_kw) * dt
 
     pv_reactive_loss_energy = np.sum([
@@ -51,7 +50,8 @@ def save_summary(sim_results, output_dir):
 
     total_cost = np.sum(costs)
 
-    voltage_values = np.concatenate(list(voltages_pu.values()))
+    phase_voltages = sim_results["results"].phase_voltages_pu
+    voltage_values = np.concatenate([values for phases in phase_voltages.values() for values in phases.values()])
 
     summary = {
         "simulation": {
@@ -98,8 +98,8 @@ def save_summary(sim_results, output_dir):
 
         devices_data[f"bess_{bess.id}_p_net_kw"] = p
         devices_data[f"bess_{bess.id}_q_injection_kvar"] = q
-        devices_data[f"bess_{bess.id}_p_charge_kw"] = np.maximum(p, 0)
-        devices_data[f"bess_{bess.id}_p_discharge_kw"] = np.maximum(-p, 0)
+        devices_data[f"bess_{bess.id}_p_charge_kw"] = np.asarray(bess.array_charge_kw)
+        devices_data[f"bess_{bess.id}_p_discharge_kw"] = np.asarray(bess.array_discharge_kw)
         devices_data[f"bess_{bess.id}_soc_kwh"] = soc_kwh
         devices_data[f"bess_{bess.id}_soc_frac"] = soc_frac
         devices_data[f"bess_{bess.id}_inverter_loss_kw"] = np.asarray(
@@ -118,6 +118,12 @@ def save_summary(sim_results, output_dir):
             pv.array_inverter_loss_kw
         )
 
+    for kind, devices in (("bess", bess_list), ("pv", pv_list)):
+        for device in devices:
+            for phase, values in device.array_phase_kw.items():
+                field = "p_net_kw" if kind == "bess" else "generation_kw"
+                devices_data[f"{kind}_{device.id}_{phase}_{field}"] = values
+                devices_data[f"{kind}_{device.id}_{phase}_q_injection_kvar"] = device.array_phase_kvar[phase]
 
     pd.DataFrame(devices_data).to_csv(
         output_dir / "sim_devices_timeseries.csv",
@@ -131,19 +137,11 @@ def save_summary(sim_results, output_dir):
         "timestep": np.arange(steps),
         "timestamp": timestamps,
         "price_per_kwh": np.asarray(grid.prices),
+        "sell_price_per_kwh": np.asarray(grid.sell_prices),
         "grid_import_kw": np.maximum(grid_p, 0),
         "grid_export_kw": np.maximum(-grid_p, 0),
         "grid_q_kvar": grid_q,
         "grid_cost": costs,
-    }
-
-    # Group loads by bus
-    loads_by_bus = {
-        load.bus: (
-            np.asarray(load.array_kw),
-            np.asarray(load.array_kvar)
-        )
-        for load in load_list
     }
 
     # Add voltage and load columns bus by bus
@@ -151,18 +149,30 @@ def save_summary(sim_results, output_dir):
 
         data_buses[f"{bus}_voltage_pu"] = np.asarray(v_pu)
 
-        if bus in loads_by_bus:
-            p_load, q_load = loads_by_bus[bus]
-        else:
-            p_load = np.zeros(steps)
-            q_load = np.zeros(steps)
+        loads = [load for load in load_list if load.bus == bus]
+        p_load = sum((load.array_kw for load in loads), np.zeros(steps))
+        q_load = sum((load.array_kvar for load in loads), np.zeros(steps))
 
         data_buses[f"{bus}_p_load_kw"] = p_load
         data_buses[f"{bus}_q_load_kvar"] = q_load
+        phases = phase_voltages[bus]
+        for phase, values in phases.items():
+            data_buses[f"{bus}_{phase}_voltage_pu"] = values
+            data_buses[f"{bus}_{phase}_angle_deg"] = sim_results["results"].phase_angles_deg[bus][phase]
+            for field, attribute in (("p_load_kw", "array_kw"), ("q_load_kvar", "array_kvar")):
+                data_buses[f"{bus}_{phase}_{field}"] = sum(
+                    (np.asarray(getattr(load, attribute)) / (len(phases) if load.phase_node is None else 1)
+                     for load in loads if load.phase_node in (None, {"a": 1, "b": 2, "c": 3}[phase])),
+                    np.zeros(steps),
+                )
 
     pd.DataFrame(data_buses).to_csv(
         output_dir / "sim_buses_timeseries.csv",
         index=False,
     )
+
+    diagnostics = pd.DataFrame(sim_results["results"].diagnostics)
+    diagnostics.insert(0, "timestamp", timestamps)
+    diagnostics.to_csv(output_dir / "sim_diagnostics_timeseries.csv", index=False)
 
     return summary

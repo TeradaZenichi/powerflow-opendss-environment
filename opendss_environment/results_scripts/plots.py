@@ -143,7 +143,8 @@ def _plot_reactive_power(sim_results, output_dir):
 def _plot_bus_voltages(sim_results, output_dir):
 
        steps = sim_results["steps"]
-       voltages = sim_results["results"].voltages
+       voltages = {f"{bus}/{phase}": values for bus, phases in sim_results["results"].phase_voltages.items()
+                   for phase, values in phases.items()}
        dt = sim_results["dt"]
 
        hours = [timestamps.hour for timestamps in sim_results["timestamps"]]
@@ -179,7 +180,8 @@ def _plot_bus_voltages(sim_results, output_dir):
 def _plot_bus_voltages_pu(sim_results, output_dir):
 
        steps = sim_results["steps"]
-       voltages = sim_results["results"].voltages_pu
+       voltages = {f"{bus}/{phase}": values for bus, phases in sim_results["results"].phase_voltages_pu.items()
+                   for phase, values in phases.items()}
        dt = sim_results["dt"]
 
        hours = [timestamps.hour for timestamps in sim_results["timestamps"]]

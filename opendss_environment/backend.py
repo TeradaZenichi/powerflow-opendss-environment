@@ -88,6 +88,23 @@ class _CktElement:
     def powers(self):
         return self._dss.CktElement.Powers()
 
+    @property
+    def normal_current_limits(self):
+        """Normal current rating for each terminal, including transformer voltage levels."""
+        rating = self._dss.CktElement.NormalAmps()
+        count = self._dss.CktElement.NumTerminals()
+        if not self._dss.CktElement.Name().lower().startswith("transformer."):
+            return [rating if rating > 0 else None] * count
+        transformer = self._dss.Transformers
+        transformer.Name(self._dss.CktElement.Name().split(".", 1)[1])
+        winding = transformer.Wdg()
+        ratings = []
+        for terminal in range(1, count + 1):
+            transformer.Wdg(terminal)
+            ratings.append(transformer.kVA() / transformer.kV())
+        transformer.Wdg(winding)
+        return [rating * value / ratings[0] if rating > 0 else None for value in ratings]
+
 
 class OpenDSSDirectBackend:
     """Expose the subset of OpenDSS used by :class:`MicrogridEnv`."""

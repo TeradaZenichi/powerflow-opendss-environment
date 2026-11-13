@@ -89,6 +89,8 @@ class PV:
         self.phase_profiles = config.phase_profiles or {}
         self.array_kw = []
         self.array_kvar = []
+        self.array_phase_kw = {}
+        self.array_phase_kvar = {}
         self.array_p_net_kw = []
         self.array_grid_consumption_kw = []
         self.array_inverter_loss_kw = []
@@ -101,6 +103,8 @@ class PV:
         """Accept a complete, electrically solved operation from a private copy."""
         self.array_kw[:] = pending.array_kw
         self.array_kvar[:] = pending.array_kvar
+        self.array_phase_kw = pending.array_phase_kw
+        self.array_phase_kvar = pending.array_phase_kvar
         self.array_p_net_kw[:] = pending.array_p_net_kw
         self.array_grid_consumption_kw[:] = pending.array_grid_consumption_kw
         self.array_inverter_loss_kw[:] = pending.array_inverter_loss_kw
@@ -181,6 +185,10 @@ class BESS:
         self.array_soc = []
         self.array_kw = []
         self.array_kvar = []
+        self.array_charge_kw = []
+        self.array_discharge_kw = []
+        self.array_phase_kw = {}
+        self.array_phase_kvar = {}
         self.array_inverter_loss_kw = []
 
     def commit(self, pending):
@@ -189,50 +197,18 @@ class BESS:
         self.array_soc[:] = pending.array_soc
         self.array_kw[:] = pending.array_kw
         self.array_kvar[:] = pending.array_kvar
+        self.array_charge_kw[:] = pending.array_charge_kw
+        self.array_discharge_kw[:] = pending.array_discharge_kw
+        self.array_phase_kw = pending.array_phase_kw
+        self.array_phase_kvar = pending.array_phase_kvar
         self.array_inverter_loss_kw[:] = pending.array_inverter_loss_kw
 
     def operate(self, p_bess, q_bess, dt):
-        if dt <= 0.0:
-            raise ValueError("dt must be positive")
-
-        if not self.reactive_control:
-            q_bess = 0.0
-        q_bess = max(-self.s_max_kva, min(q_bess, self.s_max_kva))
-
-        p_capability_kw = math.sqrt(max(self.s_max_kva ** 2 - q_bess ** 2, 0.0))
-        p_bess = max(-min(self.p_discharge_max_kw, p_capability_kw), min(p_bess, min(self.p_charge_max_kw, p_capability_kw)))
-
-        inverter_loss_kw = self._reactive_loss(q_bess)
-        available_energy_rate_kw = (self.soc - self.soc_min_frac) * self.e_cap_kwh / dt
-
-        if p_bess < 0.0:
-            if inverter_loss_kw > available_energy_rate_kw:
-                q_bess = self._q_for_loss(available_energy_rate_kw, q_bess)
-                inverter_loss_kw = self._reactive_loss(q_bess)
-            max_discharge_kw = max(available_energy_rate_kw - inverter_loss_kw, 0.0) * self.eta_discharge
-            p_bess = max(p_bess, -max_discharge_kw)
-        else:
-            available_loss_kw = available_energy_rate_kw + self.eta_charge * p_bess
-            if inverter_loss_kw > available_loss_kw:
-                q_bess = self._q_for_loss(available_loss_kw, q_bess)
-                inverter_loss_kw = self._reactive_loss(q_bess)
-            max_charge_kw = ((self.soc_max_frac - self.soc) * self.e_cap_kwh / dt + inverter_loss_kw) / self.eta_charge
-            p_bess = min(p_bess, max(max_charge_kw, 0.0))
-
-        if p_bess >= 0:
-            energy_change_kw = self.eta_charge * p_bess - inverter_loss_kw
-        else:
-            energy_change_kw = p_bess / self.eta_discharge - inverter_loss_kw
-
-        self.soc += energy_change_kw / self.e_cap_kwh * dt
-        self.soc = min(self.soc_max_frac, max(self.soc_min_frac, self.soc))
-
-        self.array_kw.append(p_bess)
-        self.array_kvar.append(q_bess)
-        self.array_soc.append(self.soc)
-        self.array_inverter_loss_kw.append(inverter_loss_kw)
-
-        return p_bess, q_bess
+        """Keep the total-command API using the same model as phase commands."""
+        phases = self.phases or ("a",)
+        p, q = self.operate_phases(dict.fromkeys(phases, p_bess / len(phases)),
+                                   dict.fromkeys(phases, q_bess / len(phases)), dt)
+        return sum(p.values()), sum(q.values())
 
     def operate_phases(self, p_by_phase, q_by_phase, dt):
         if dt <= 0.0:
@@ -302,22 +278,20 @@ class BESS:
         self.array_kvar.append(sum(q.values()))
         self.array_soc.append(self.soc)
         self.array_inverter_loss_kw.append(inverter_loss_kw)
+        self._record_phases(p, q)
         return p, q
 
-    def _reactive_loss(self, q_bess):
-        if self.q_loss_rated_kw <= 0.0:
-            return 0.0
-        return self.q_loss_rated_kw * (q_bess / self.s_max_kva) ** 2
-
-    def _q_for_loss(self, loss_kw, requested_q):
-        if self.q_loss_rated_kw <= 0.0:
-            return requested_q
-        q_limit = self.s_max_kva * math.sqrt(max(loss_kw, 0.0) / self.q_loss_rated_kw)
-        return math.copysign(min(abs(requested_q), q_limit), requested_q)
+    def _record_phases(self, active, reactive):
+        self.array_charge_kw.append(sum(max(value, 0.0) for value in active.values()))
+        self.array_discharge_kw.append(sum(max(-value, 0.0) for value in active.values()))
+        for phase in active:
+            self.array_phase_kw.setdefault(phase, []).append(active[phase])
+            self.array_phase_kvar.setdefault(phase, []).append(reactive[phase])
 
 class Grid:
-    def __init__(self, prices):
+    def __init__(self, prices, sell_prices=None):
         self.prices = prices
+        self.sell_prices = prices if sell_prices is None else sell_prices
         self.array_kw = []
         self.array_kvar = []
 
@@ -325,6 +299,7 @@ class Grid:
 class Results:
     def __init__(self):
         self.costs = []
+        self.diagnostics = []
         self.voltages = None
         self.voltages_pu = None
         self.phase_voltages = None
@@ -333,6 +308,7 @@ class Results:
 
     def commit(self, pending):
         self.costs[:] = pending.costs
+        self.diagnostics[:] = pending.diagnostics
         self.voltages = pending.voltages
         self.voltages_pu = pending.voltages_pu
         self.phase_voltages = pending.phase_voltages

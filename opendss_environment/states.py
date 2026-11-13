@@ -111,7 +111,7 @@ def build_named_observation(env):
         "branches": env.pre_action_branch_measurements,
         "grid": {
             "buy_price_per_kwh": price,
-            "sell_price_per_kwh": price * env.data["feed_in_tariff_ratio"],
+            "sell_price_per_kwh": float(env.grid.sell_prices[env.idx]),
         },
         "bess": bess,
         "pv": pv,

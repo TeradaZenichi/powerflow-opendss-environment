@@ -197,6 +197,7 @@ def collect_branch_measurements(env):
         element = env.dss.cktelement
         nodes, powers = element.node_order, element.powers
         currents, count = element.currents_mag_ang, element.num_conductors
+        limits = element.normal_current_limits
         for terminal, bus in enumerate(element.bus_names):
             for conductor in range(count):
                 position = terminal * count + conductor
@@ -210,6 +211,8 @@ def collect_branch_measurements(env):
                     "q_flow_pu": float(powers[2 * position + 1]) / base,
                     "current_a": float(currents[2 * position]),
                     "current_angle_deg": float(currents[2 * position + 1]),
+                    "normal_current_a": limits[terminal],
+                    "loading_pct": None if limits[terminal] is None else 100 * float(currents[2 * position]) / limits[terminal],
                 })
     return measurements
 
@@ -301,6 +304,7 @@ def _simulation_setup(env):
         DssDevice(env, pv, "Generator").create()
 
     for bess in env.bess_list:
+        bess.phases = _device_phases(bess, env.data["phases"])
         DssDevice(env, bess, "Load").create()
 
     for load in env.load_list:
@@ -315,7 +319,7 @@ def _simulation_setup(env):
             kv *= np.sqrt(3.0)
         env.dss.text(
             f"New Load.{load.id} bus1={bus} phases={phases} kv={kv} "
-            "kw=0 kvar=0 conn=wye model=1"
+            "kw=0 kvar=0 conn=wye model=1 vminpu=0 vmaxpu=2"
         )
 
 def _update_snapshot_powers(env, action=None):
@@ -504,8 +508,6 @@ class PVDispatch:
         pv.array_inverter_loss_kw[-1] = point.inverter_loss_kw
         if pv.dispatch_mode == "per_phase":
             pv._phase_points = self.points
-        if applied_action is None:
-            return
         if pv.dispatch_mode == "aggregate":
             phases = self.element.phases
             generation = _phase_result(point.generation_kw, phases, len(phases))
@@ -513,6 +515,11 @@ class PVDispatch:
         else:
             generation = {phase: value.generation_kw for phase, value in self.points.items()}
             reactive = {phase: value.q_injection_kvar for phase, value in self.points.items()}
+        for phase in generation:
+            pv.array_phase_kw.setdefault(phase, []).append(generation[phase])
+            pv.array_phase_kvar.setdefault(phase, []).append(reactive[phase])
+        if applied_action is None:
+            return
         available = sum(request.available_kw for request in self.requests.values())
         applied_action["pv"][pv.id].update({
             "generation_kw": generation,
@@ -570,7 +577,7 @@ def solve_power_flow(env, applied_action=None):
 
     import_kw = max(-grid_kw, 0.0)
     export_kw = max(grid_kw, 0.0)
-    cost = (import_kw - env.data["feed_in_tariff_ratio"] * export_kw) * env.grid.prices[env.idx] * env.dt
+    cost = (import_kw * env.grid.prices[env.idx] - export_kw * env.grid.sell_prices[env.idx]) * env.dt
     env.results.costs.append(cost)
 
     env.current_grid_kw = grid_kw

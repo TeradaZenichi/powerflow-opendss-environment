@@ -12,6 +12,7 @@ from opendss_environment.actions import prepare_action
 from opendss_environment.data import load_data, episode_data
 from opendss_environment.states import build_named_observation, build_state
 from opendss_environment.rewards import Reward
+from opendss_environment.diagnostics import electrical_diagnostics
 from opendss_environment.simulation import (
     _simulation_setup,
     _update_snapshot_powers,
@@ -151,6 +152,12 @@ class MicrogridEnv(gym.Env):
         grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
 
         self.current_cost = cost
+        diagnostics = electrical_diagnostics(self)
+        self.results.diagnostics.append({
+            "within_limits": diagnostics["within_limits"],
+            **{name: len(diagnostics[name]) for name in ("voltage_violations", "branch_overloads", "grid_excess_pu")},
+            "unrated_branch_terminals": diagnostics["unrated_branch_terminals"],
+        })
         reward = self.reward_function(self)
         self.episode_reward += reward
         self.idx += 1
@@ -175,6 +182,7 @@ class MicrogridEnv(gym.Env):
             "bus_voltages_v": self.current_bus_snapshot.volts,
             "bus_angles_deg": self.current_bus_angles_deg,
             "branch_measurements": self.current_branch_measurements,
+            "diagnostics": diagnostics,
             "requested_action": prepared.requested,
             "executed_action": applied_action,
             "device_measurements": self.current_device_measurements,
