@@ -9,7 +9,10 @@ from pu_normalizer import PUNormalizer
 from opendss_environment.backend import OpenDSSDirectBackend
 from opendss_environment.actions import prepare_action
 from opendss_environment.data import load_data, episode_data
-from opendss_environment.states import build_named_observation, build_state
+from opendss_environment.states import (
+    build_controller_observation, build_local_observation,
+    build_named_observation, build_state,
+)
 from opendss_environment.rewards import Reward
 from opendss_environment.diagnostics import electrical_diagnostics
 from opendss_environment.simulation import (
@@ -79,15 +82,21 @@ class MicrogridEnv(gym.Env):
     def load_episode_data(self, episode_idx):
         episode = episode_data(self.data, episode_idx, self.episode_steps)
 
-        for name in ("dt", "steps", "timestamps", "grid", "bess_list", "pv_list", "load_list", "results"):
+        for name in (
+            "dt", "steps", "timestamps", "grid", "bess_list", "pv_list",
+            "evse_list", "load_list", "results",
+        ):
             setattr(self, name, episode[name])
 
     def _clear_episode_state(self):
         self.idx = 0
         self.current_cost = 0.0
         self.episode_reward = 0.0
-        self.current_device_measurements = {"bess": {}, "pv": {}}
-        self.previous_device_measurements = {"bess": {}, "pv": {}}
+        groups = {"bess": {}, "pv": {}}
+        if getattr(self, "evse_list", []):
+            groups["evse"] = {}
+        self.current_device_measurements = deepcopy(groups)
+        self.previous_device_measurements = deepcopy(groups)
         self.current_branch_measurements = []
 
     def reset(self, *, seed=None, options=None):
@@ -134,8 +143,8 @@ class MicrogridEnv(gym.Env):
     def _copy_for_step(self):
         """Stage mutable simulation data while retaining the external DSS context."""
         pending = copy(self)
-        pending.bess_list, pending.pv_list, pending.grid, pending.results = deepcopy(
-            (self.bess_list, self.pv_list, self.grid, self.results)
+        pending.bess_list, pending.pv_list, pending.evse_list, pending.grid, pending.results = deepcopy(
+            (self.bess_list, self.pv_list, self.evse_list, self.grid, self.results)
         )
         return pending
 
@@ -197,6 +206,8 @@ class MicrogridEnv(gym.Env):
             current.commit(completed)
         for current, completed in zip(self.pv_list, pending.pv_list):
             current.commit(completed)
+        for current, completed in zip(self.evse_list, pending.evse_list):
+            current.commit(completed)
         self.grid.array_kw[:] = pending.grid.array_kw
         self.grid.array_kvar[:] = pending.grid.array_kvar
         self.results.commit(pending.results)
@@ -211,8 +222,24 @@ class MicrogridEnv(gym.Env):
             raise RuntimeError("Call reset() before observing, including after an execution failure")
         return build_named_observation(self)
 
+    def observe_local(self, kind, device_id, *, include=None, observation=None):
+        """Return a selected device view without solving or advancing time."""
+        if self._needs_reset:
+            raise RuntimeError("Call reset() before observing, including after an execution failure")
+        return build_local_observation(self, kind, device_id, observation, include)
+
+    def observe_controller(
+        self, bus, observed_components, *, extra_features=(), observation=None,
+    ):
+        """Return one nodal view with an explicit component allowlist."""
+        if self._needs_reset:
+            raise RuntimeError("Call reset() before observing, including after an execution failure")
+        return build_controller_observation(
+            self, bus, observed_components, observation, extra_features,
+        )
+
     def get_episode_results(self):
-        return {
+        results = {
             "dt": self.dt,
             "steps": self.steps,
             "timestamps": self.timestamps,
@@ -223,3 +250,6 @@ class MicrogridEnv(gym.Env):
             "results": self.results,
             "episode_reward": self.episode_reward,
         }
+        if self.evse_list:
+            results["evse_list"] = self.evse_list
+        return results

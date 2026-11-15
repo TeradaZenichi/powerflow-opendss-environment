@@ -5,7 +5,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from .actions import Action, PhaseAction, TotalAction
+from .actions import Action, EVSEAction, PhaseAction, TotalAction
 
 
 class GymAdapter(gym.Env):
@@ -23,15 +23,20 @@ class GymAdapter(gym.Env):
                 return [path for key in sorted(value) for path in paths(value[key], prefix + (key,))]
             return [prefix]
 
+        groups = [group for group in ("buses", "bess", "pv", "evse", "grid") if group in observation]
         self.observation_paths = observation_paths if observation_paths is not None else [
-            path for group in ("buses", "bess", "pv", "grid") for path in paths(observation[group], (group,))
+            path for group in groups for path in paths(observation[group], (group,))
         ]
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(len(self.observation_paths),), dtype=np.float64)
         self.action_order, lower, upper = [], [], []
-        available = {"bess": env.bess_list, "pv": env.pv_list}
+        available = {
+            "bess": env.bess_list,
+            "pv": env.pv_list,
+            "evse": [device for device in env.evse_list if device.controlled],
+        }
         selected = {group: [device.id for device in items] for group, items in available.items()} if devices is None else devices
         if set(selected) - set(available):
-            raise ValueError("Controlled device groups must be bess or pv")
+            raise ValueError("Controlled device groups must be bess, pv or evse")
         for group, items in available.items():
             if set(selected.get(group, [])) - {device.id for device in items}:
                 raise ValueError(f"Unknown controlled {group} device")
@@ -44,7 +49,9 @@ class GymAdapter(gym.Env):
                 for phase in slots:
                     p_min = -min(device.p_discharge_max_kw, device.s_max_kva / count) if group == "bess" else 0.0
                     p_max = min(device.p_charge_max_kw, device.s_max_kva / count) if group == "bess" else device.p_max_kw / count
-                    q_max = device.s_max_kva / count if group == "pv" or device.reactive_control else 0.0
+                    q_max = 0.0 if group == "evse" else (
+                        device.s_max_kva / count if group == "pv" or device.reactive_control else 0.0
+                    )
                     self.action_order.append((group, device.id, phase))
                     lower.extend((p_min, -q_max))
                     upper.extend((p_max, q_max))
@@ -77,10 +84,13 @@ class GymAdapter(gym.Env):
         requested = Action(
             bess={key: TotalAction(0.0) for key in observation["bess"]},
             pv={key: TotalAction(sum(value["available_pu"].values())) for key, value in observation["pv"].items()},
+            evse={key: EVSEAction(0.0) for key, value in observation.get("evse", {}).items() if value["controlled"]},
         )
         for (group, device, phase), (p, q) in zip(self.action_order, action.reshape(-1, 2)):
             commands = getattr(requested, group)
-            if phase is None:
+            if group == "evse":
+                commands[device] = EVSEAction(float(p))
+            elif phase is None:
                 commands[device] = TotalAction(float(p), float(q))
             else:
                 if not isinstance(commands[device], PhaseAction):
@@ -98,7 +108,10 @@ class GymAdapter(gym.Env):
         for bus, values in state["buses"].items():
             values["v_before_pu"] = info["bus_voltages_pu"][bus]
             values["angle_before_deg"] = info["bus_angles_deg"][bus]
-        for group, field in (("bess", "p_net_pu"), ("pv", "generation_pu")):
+        groups = [("bess", "p_net_pu"), ("pv", "generation_pu")]
+        if "evse" in state:
+            groups.append(("evse", "p_net_pu"))
+        for group, field in groups:
             for device, values in state[group].items():
                 measured = info["device_measurements"][group][device]
                 values["previous_p_pu"] = measured[field]

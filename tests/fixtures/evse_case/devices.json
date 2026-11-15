@@ -1,0 +1,20 @@
+{
+  "bess": [],
+  "pv": [],
+  "evse": [
+    {
+      "id": "c1",
+      "bus": "load",
+      "phases": ["a"],
+      "p_max_kw": 12.0,
+      "control_mode": "controlled"
+    },
+    {
+      "id": "a1",
+      "bus": "load",
+      "phases": ["b"],
+      "p_max_kw": 6.0,
+      "control_mode": "asap"
+    }
+  ]
+}

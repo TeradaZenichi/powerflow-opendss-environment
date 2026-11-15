@@ -1,8 +1,10 @@
 """OpenDSS simulation setup and execution."""
 
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 import numpy as np
 from .elements import PVPoint, PVRequest
+from .evse import utc_timestamp
 from .network import PHASE_NAME as _PHASE_NAME, device_phases as _device_phases
 
 
@@ -169,10 +171,14 @@ def collect_device_measurements(env):
     """Read solved terminal powers and convert them to the public convention."""
 
     measurements = {"bess": {}, "pv": {}}
+    evse_list = getattr(env, "evse_list", [])
+    if evse_list:
+        measurements["evse"] = {}
 
     for kind, devices, element, active_field, total_field, sign in (
         ("bess", env.bess_list, "Load", "p_net_kw", "p_net_total_kw", 1.0),
         ("pv", env.pv_list, "Generator", "generation_kw", "generation_total_kw", -1.0),
+        ("evse", evse_list, "Load", "p_net_kw", "p_net_total_kw", 1.0),
     ):
         for device in devices:
             terminal = DssDevice(env, device, element).terminal_power()
@@ -252,6 +258,9 @@ def _set_loads(env):
 def prepare_pre_action_observation(env):
     """Measure current loads with held device setpoints, without integrating energy."""
     _set_loads(env)
+    timestamp = utc_timestamp(env.timestamps.iloc[env.idx])
+    for evse in env.evse_list:
+        DssDevice(env, evse, "Load").edit(evse.preview_power(timestamp), 0.0)
     controls = []
     previous = _current_snapshot(env)
     if env.idx > 0:
@@ -306,6 +315,10 @@ def _simulation_setup(env):
         bess.phases = _device_phases(bess, env.data["phases"])
         DssDevice(env, bess, "Load").create()
 
+    for evse in env.evse_list:
+        evse.phases = _device_phases(evse, env.data["phases"])
+        DssDevice(env, evse, "Load").create()
+
     for load in env.load_list:
         if load.phase_node is None:
             bus = load.bus
@@ -327,12 +340,16 @@ def _update_snapshot_powers(env, action=None):
     _set_loads(env)
 
     applied = {"bess": {}, "pv": {}}
+    if env.evse_list:
+        applied["evse"] = {}
     snapshot = _current_snapshot(env)
 
     for pv in env.pv_list:
         applied["pv"][pv.id] = _apply_pv(env, pv, action, snapshot)
     for bess in env.bess_list:
         applied["bess"][bess.id] = _apply_bess(env, bess, action)
+    for evse in env.evse_list:
+        applied["evse"][evse.id] = _apply_evse(env, evse, action)
 
     return applied
 
@@ -456,6 +473,24 @@ def _apply_bess(env, bess, action):
         "soc_before_frac": soc_before_frac,
         "soc_after_frac": bess.soc,
         "inverter_loss_kw": bess.array_inverter_loss_kw[-1],
+    }
+
+
+def _apply_evse(env, evse, action):
+    command_kw = 0.0
+    if evse.controlled and action is not None:
+        command_kw = _aggregate(_device_command(action, "evse", evse)["p_net_kw"])
+    start = utc_timestamp(env.timestamps.iloc[env.idx])
+    end = start + timedelta(hours=env.dt)
+    result = evse.operate(start, end, command_kw)
+    phases = _device_phases(evse, env.data["phases"])
+    p_by_phase = _phase_result(result["p_net_total_kw"], phases, len(phases))
+    DssDevice(env, evse, "Load").edit(result["p_net_total_kw"], 0.0)
+    return {
+        "p_net_kw": p_by_phase,
+        "q_injection_kvar": dict.fromkeys(phases, 0.0),
+        "q_injection_total_kvar": 0.0,
+        **result,
     }
 
 

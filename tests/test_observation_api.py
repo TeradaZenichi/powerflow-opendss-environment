@@ -121,6 +121,65 @@ class ObservationApiTest(unittest.TestCase):
         self.assertEqual(info["observation_before"], reset_info["observation"])
         self.assertIsInstance(env.observe(), dict)
 
+    def test_local_observation_selects_one_device_bus_branches_and_grid(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        global_observation, _ = env.reset()
+        local = env.observe_local(
+            "bess", "b1", include=("device", "bus", "branches", "grid"),
+            observation=global_observation,
+        )
+        self.assertEqual(local["local_observation_schema_version"], 1)
+        self.assertEqual(local["timestamp"], global_observation["timestamp"])
+        self.assertEqual(local["controller"], {
+            "kind": "bess", "id": "b1", "bus": "bus_004",
+            "phases": ["a", "b", "c"],
+        })
+        self.assertEqual(local["device"], global_observation["bess"]["b1"])
+        self.assertEqual(local["bus"], global_observation["buses"]["bus_004"])
+        self.assertTrue(local["branches"])
+        self.assertTrue(all(item["bus"] == "bus_004" for item in local["branches"]))
+        self.assertTrue(all(item["neighbor_bus"] == "bus_003" for item in local["branches"]))
+        self.assertEqual(local["grid"], global_observation["grid"])
+
+        local["device"]["soc_before_frac"] = 0.0
+        local["bus"]["p_load_pu"]["a"] = 999.0
+        self.assertEqual(global_observation["bess"]["b1"]["soc_before_frac"], 0.5)
+        self.assertNotEqual(global_observation["buses"]["bus_004"]["p_load_pu"]["a"], 999.0)
+
+    def test_local_observation_sections_and_ids_are_explicit(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        global_observation, _ = env.reset()
+        local = env.observe_local(
+            "pv", "pv1", include=("device", "grid"),
+            observation=global_observation,
+        )
+        self.assertIn("device", local)
+        self.assertIn("grid", local)
+        self.assertNotIn("bus", local)
+        self.assertNotIn("branches", local)
+        default = env.observe_local("pv", "pv1", observation=global_observation)
+        self.assertIn("device", default)
+        self.assertIn("bus", default)
+        self.assertNotIn("branches", default)
+        self.assertNotIn("grid", default)
+        with self.assertRaisesRegex(ValueError, "Unknown evse"):
+            env.observe_local("evse", "missing", observation=global_observation)
+        with self.assertRaisesRegex(ValueError, "sections"):
+            env.observe_local("pv", "pv1", include=("buses",), observation=global_observation)
+
+    def test_controller_can_observe_explicit_components_independently_of_bus(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        global_observation, _ = env.reset()
+        local = env.observe_controller(
+            "bus_004", {"bess": ("b1",), "pv": ("pv1",)},
+            extra_features=("grid",), observation=global_observation,
+        )
+        self.assertEqual(set(local["components"]), {"bess", "pv"})
+        self.assertEqual(local["components"]["bess"]["b1"]["bus"], "bus_004")
+        self.assertEqual(local["components"]["pv"]["pv1"]["bus"], "bus_005")
+        self.assertIn("grid", local)
+        self.assertNotIn("branches", local)
+
 
 if __name__ == "__main__":
     unittest.main()

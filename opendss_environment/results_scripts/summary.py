@@ -19,6 +19,7 @@ def save_summary(sim_results, output_dir):
     grid = sim_results["grid"]
     bess_list = sim_results["bess_list"]
     pv_list = sim_results["pv_list"]
+    evse_list = sim_results.get("evse_list", [])
     load_list = sim_results["load_list"]
 
     costs = np.asarray(sim_results["results"].costs)
@@ -47,6 +48,9 @@ def save_summary(sim_results, output_dir):
     pv_reactive_loss_energy = np.sum([
         np.sum(pv.array_inverter_loss_kw) for pv in pv_list
     ]) * dt
+    ev_delivered_energy = sum(evse.delivered_kwh for evse in evse_list)
+    ev_prior_energy = sum(evse.energy_before_episode_kwh for evse in evse_list)
+    ev_unmet_energy = sum(evse.unmet_kwh for evse in evse_list)
 
     total_cost = np.sum(costs)
 
@@ -66,7 +70,10 @@ def save_summary(sim_results, output_dir):
             "bess_charge_kwh": bess_charge_energy,
             "bess_discharge_kwh": bess_discharge_energy,
             "bess_reactive_loss_kwh": bess_reactive_loss_energy,
-            "pv_reactive_loss_kwh": pv_reactive_loss_energy
+            "pv_reactive_loss_kwh": pv_reactive_loss_energy,
+            "ev_delivered_kwh": ev_delivered_energy,
+            "ev_before_episode_kwh": ev_prior_energy,
+            "ev_unmet_kwh": ev_unmet_energy,
         },
         "cost": {
             "total_energy_cost": total_cost
@@ -117,6 +124,15 @@ def save_summary(sim_results, output_dir):
         devices_data[f"pv_{pv.id}_inverter_loss_kw"] = np.asarray(
             pv.array_inverter_loss_kw
         )
+
+    for evse in evse_list:
+        devices_data[f"evse_{evse.id}_p_net_kw"] = np.asarray(evse.array_kw)
+        devices_data[f"evse_{evse.id}_energy_kwh"] = np.asarray(evse.array_energy_kwh)
+        devices_data[f"evse_{evse.id}_connected_fraction"] = np.asarray(
+            evse.array_connected_fraction
+        )
+        devices_data[f"evse_{evse.id}_session_id"] = np.asarray(evse.array_session_id)
+        devices_data[f"evse_{evse.id}_soc_frac"] = np.asarray(evse.array_soc)
 
     for kind, devices in (("bess", bess_list), ("pv", pv_list)):
         for device in devices:

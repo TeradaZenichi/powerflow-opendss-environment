@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from .elements import BESS, BESSConfig, Grid, Load, PV, PVConfig, Results
+from .evse import EVSE, EVSEConfig, load_ev_sessions, utc_timestamp
 from .network import Network
 
 
@@ -57,6 +58,7 @@ def load_data(path):
     demand_path = path / files.get("demand", "demand.csv")
     price_path = path / files.get("prices", "price.csv")
     devices_path = path / files.get("devices", "devices.json")
+    ev_sessions_path = path / files["ev_sessions"] if "ev_sessions" in files else None
 
     # prices.csv
     price_frame = pd.read_csv(price_path, parse_dates=["timestamp"])
@@ -93,7 +95,7 @@ def load_data(path):
     else:
         devices = {}
     _validate_device_modes(devices)
-    for group in (devices.get("bess", []), devices.get("pv", [])):
+    for group in (devices.get("bess", []), devices.get("pv", []), devices.get("evse", [])):
         for device in group:
             network.connected_phases(device.get("phases", network.phases))
 
@@ -137,6 +139,10 @@ def load_data(path):
     dt = get_dt_hours(demand)
 
     steps = len(demand)
+    ev_sessions = load_ev_sessions(ev_sessions_path, devices.get("evse", []))
+    session_information = cfg.get("ev", {}).get("session_information", "target_deadline")
+    if session_information not in {"arrival_only", "target", "target_deadline"}:
+        raise ValueError("ev.session_information must be arrival_only, target or target_deadline")
 
     return {
         "dt": dt,
@@ -155,6 +161,8 @@ def load_data(path):
         "devices": devices,
         "pv_profiles": pv_profiles,
         "pv_phase_profiles": pv_phase_profiles,
+        "ev_sessions": ev_sessions,
+        "ev_session_information": session_information,
         "demand": demand,
         "prices": prices,
         "sell_prices": sell_prices,
@@ -219,6 +227,18 @@ def episode_data(data, episode_idx, episode_steps):
             )
         )
 
+    episode_start_time = utc_timestamp(data["timestamps"].iloc[episode_start])
+    episode_end_time = episode_start_time + pd.Timedelta(hours=data["dt"] * episode_steps)
+    evse_list = []
+    for values in data["devices"].get("evse", []):
+        sessions = [
+            session for session in data["ev_sessions"][str(values["id"])]
+            if session.departure > episode_start_time and session.arrival < episode_end_time
+        ]
+        evse = EVSE(EVSEConfig(**values), sessions)
+        evse.initialize(episode_start_time)
+        evse_list.append(evse)
+
     return {
         "dt": data["dt"],
         "timestamps": data["timestamps"].iloc[window].reset_index(drop=True),
@@ -229,6 +249,7 @@ def episode_data(data, episode_idx, episode_steps):
         "grid": grid,
         "bess_list": bess_list,
         "pv_list": pv_list,
+        "evse_list": evse_list,
         "load_list": load_list,
         "results": Results()
     }
@@ -282,3 +303,21 @@ def _validate_device_modes(devices):
                     raise ValueError(
                         "per_phase PV phase_profiles must define exactly its phases"
                     )
+    evse_ids = set()
+    for device in devices.get("evse", []):
+        device_id = str(device.get("id", ""))
+        if not device_id or device_id in evse_ids:
+            raise ValueError("EVSE IDs must be nonempty and unique")
+        evse_ids.add(device_id)
+        if str(device.get("connection", "wye")).lower() != "wye":
+            raise ValueError("EVSE connection must be 'wye'")
+        if str(device.get("dispatch_mode", "aggregate")).lower() != "aggregate":
+            raise ValueError("EVSE dispatch_mode must be 'aggregate'")
+        if str(device.get("control_mode", "")) not in {"controlled", "asap"}:
+            raise ValueError("EVSE control_mode must be 'controlled' or 'asap'")
+        power = device.get("p_max_kw")
+        if (
+            isinstance(power, bool) or power is None
+            or not np.isfinite(float(power)) or float(power) <= 0.0
+        ):
+            raise ValueError("EVSE p_max_kw must be finite and positive")

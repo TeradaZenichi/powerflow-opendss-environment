@@ -21,9 +21,17 @@ class PhaseAction:
 
 
 @dataclass
+class EVSEAction:
+    """Charging power for a controlled EVSE; negative power is not supported."""
+
+    p_pu: float
+
+
+@dataclass
 class Action:
     bess: dict[str, TotalAction | PhaseAction] = field(default_factory=dict)
     pv: dict[str, TotalAction | PhaseAction] = field(default_factory=dict)
+    evse: dict[str, EVSEAction] = field(default_factory=dict)
 
     def as_dict(self):
         values = {"bess": {}, "pv": {}}
@@ -44,6 +52,12 @@ class Action:
                     "mode": mode, active_field: deepcopy(command.p_pu),
                     "q_injection_pu": deepcopy(reactive),
                 }
+        if self.evse:
+            values["evse"] = {}
+            for device_id, command in self.evse.items():
+                if not isinstance(command, EVSEAction):
+                    raise TypeError("EVSE actions must be EVSEAction objects")
+                values["evse"][device_id] = {"p_net_pu": command.p_pu}
         return values
 
 
@@ -107,8 +121,11 @@ def prepare_action(env, action):
     if not isinstance(requested, dict):
         raise TypeError("Action must be an Action object or a named dictionary")
     env.normalizer.require_pu(requested)
-    if set(requested) - {"bess", "pv"}:
-        raise ValueError("Action groups must be bess and pv")
+    allowed = {"bess", "pv"}
+    if env.evse_list:
+        allowed.add("evse")
+    if set(requested) - allowed:
+        raise ValueError(f"Action groups must be {', '.join(sorted(allowed))}")
     commands = {"bess": {}, "pv": {}}
     for kind, devices, active_field in (
         ("bess", env.bess_list, "p_net_pu"),
@@ -129,4 +146,18 @@ def prepare_action(env, action):
                         raise ValueError(f"Unequal phase commands require per_phase dispatch for {device.id!r}")
                 p, q = sum(p.values()), sum(q.values())
             commands[kind][device.id] = {active_field: p, "q_injection_pu": q}
+    if env.evse_list:
+        controlled = [device for device in env.evse_list if device.controlled]
+        group = requested.get("evse", {})
+        if not isinstance(group, dict) or set(group) != {device.id for device in controlled}:
+            raise ValueError("Action EVSE IDs must exactly match the controlled devices")
+        commands["evse"] = {}
+        for device in controlled:
+            command = group[device.id]
+            if not isinstance(command, dict) or set(command) != {"p_net_pu"}:
+                raise ValueError("EVSE action requires only p_net_pu")
+            power = _finite_power(command["p_net_pu"])
+            if power < 0.0:
+                raise ValueError("EVSE charging power must be nonnegative")
+            commands["evse"][device.id] = {"p_net_pu": power}
     return PreparedAction(requested, env.normalizer.denormalize(commands))

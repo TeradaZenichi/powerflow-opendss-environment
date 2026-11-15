@@ -16,7 +16,7 @@ The Python package is `opendss_environment`, installed as the distribution
 `opendss-environment`. Its public API exposes the environment and device actions:
 
 ```python
-from opendss_environment import Action, EnvironmentConfig, MicrogridEnv, TotalAction
+from opendss_environment import Action, EnvironmentConfig, EVSEAction, MicrogridEnv, TotalAction
 ```
 
 See [profiles, tariffs, diagnostics and the RL adapter](docs/control-api.md)
@@ -173,6 +173,45 @@ angle in degrees. Both terminal directions are captured before preparing the
 next interval; neutral conductors are omitted. These diagnostic fields do not
 change the controller's observation.
 
+### Global and local observations
+
+`observe()` returns the complete named pre-action observation. Controllers can
+derive several local views from that same snapshot without another OpenDSS
+solution:
+
+```python
+global_observation = env.observe()
+local = env.observe_local(
+    "evse", "e065",
+    include=("device", "bus", "branches", "grid"),
+    observation=global_observation,
+)
+```
+
+The local view contains stable metadata plus only the selected device, its bus,
+incident branch terminals and grid prices. By default only `device` and `bus`
+are returned. `branches` optionally exposes local terminal flows together with
+`neighbor_bus`; `grid` optionally exposes the price broadcast. Returned values
+are deep copies, so a controller cannot mutate the global observation or
+environment state.
+
+When one controller observes a selected set of components, declare the node
+and component allowlist independently:
+
+```python
+controller_observation = env.observe_controller(
+    "bus_004",
+    {"evse": ("e065",), "bess": ("b1",)},
+    extra_features=("branches", "grid"),
+    observation=global_observation,
+)
+```
+
+Other components remain hidden even when connected to `bus_004`. A listed
+component may be on another bus; its own `bus` and `phases` metadata remain
+explicit. Observation access does not grant control authority—the action
+contract separately determines which device commands the controller supplies.
+
 Voltages are phase-to-neutral magnitudes in per unit. Three-phase circuits use
 the OpenDSS voltage base of each bus. The single-phase equivalent uses the case's
 `base.v_base_kv` as its phase-to-neutral base, matching the device voltage setup.
@@ -235,6 +274,48 @@ observation, reward, terminated, truncated, info = env.step(action)
 `episode_steps=None` (the default) uses the complete case. A directory or a
 configuration file can be passed as `case_path`. Relative data and DSS paths
 are resolved from that case, independently of the calling repository.
+
+## Optional EVSE sessions
+
+Add `files.ev_sessions` and an `evse` device group only in cases that use EVs.
+The session CSV must define `id`, `evse`, `arr`, `dep`, `soc0`, `soct`,
+`cap_kwh`, `eta`, `e_kwh`, and `p_kw`. Exact arrival and departure times are
+processed inside each environment interval; OpenDSS receives the
+energy-equivalent average power for that interval.
+
+```json
+"evse": [
+  {
+    "id": "e065",
+    "bus": "bus_002",
+    "phases": ["a", "b", "c"],
+    "p_max_kw": 22.0,
+    "control_mode": "controlled"
+  },
+  {
+    "id": "e067",
+    "bus": "bus_003",
+    "phases": ["a", "b", "c"],
+    "p_max_kw": 22.0,
+    "control_mode": "asap"
+  }
+]
+```
+
+`asap` EVSEs charge immediately and are omitted from the action. Controlled
+EVSEs require one nonnegative command each. With `step(None)`, controlled
+EVSEs are idle and `asap` EVSEs continue charging.
+
+```python
+action = Action(evse={"e065": EVSEAction(p_pu=0.022)})
+observation, reward, terminated, truncated, info = env.step(action)
+```
+
+The command remains fixed for the full interval and also applies to a vehicle
+that arrives between samples. Charging is unidirectional and uses unity power
+factor. An `asap` session active at the episode boundary is reconstructed from
+its deterministic prior charging. A controlled carry-in session is rejected
+because its previous actions are unknown.
 
 Declare the network meaning in the case configuration:
 
