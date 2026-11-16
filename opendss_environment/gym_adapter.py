@@ -47,10 +47,15 @@ class GymAdapter(gym.Env):
                 slots = phases if device.dispatch_mode == "per_phase" else (None,)
                 count = len(slots)
                 for phase in slots:
-                    p_min = -min(device.p_discharge_max_kw, device.s_max_kva / count) if group == "bess" else 0.0
+                    if group == "bess":
+                        p_min = -min(device.p_discharge_max_kw, device.s_max_kva / count)
+                    elif group == "evse" and device.v2g:
+                        p_min = -device.p_discharge_max_kw / count
+                    else:
+                        p_min = 0.0
                     p_max = min(device.p_charge_max_kw, device.s_max_kva / count) if group == "bess" else device.p_max_kw / count
-                    q_max = 0.0 if group == "evse" else (
-                        device.s_max_kva / count if group == "pv" or device.reactive_control else 0.0
+                    q_max = device.s_max_kva / count if group in {"pv", "evse"} else (
+                        device.s_max_kva / count if device.reactive_control else 0.0
                     )
                     self.action_order.append((group, device.id, phase))
                     lower.extend((p_min, -q_max))
@@ -89,7 +94,7 @@ class GymAdapter(gym.Env):
         for (group, device, phase), (p, q) in zip(self.action_order, action.reshape(-1, 2)):
             commands = getattr(requested, group)
             if group == "evse":
-                commands[device] = EVSEAction(float(p))
+                commands[device] = EVSEAction(float(p), float(q))
             elif phase is None:
                 commands[device] = TotalAction(float(p), float(q))
             else:

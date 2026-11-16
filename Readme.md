@@ -20,7 +20,8 @@ from opendss_environment import Action, EnvironmentConfig, EVSEAction, Microgrid
 ```
 
 See [profiles, tariffs, diagnostics and the RL adapter](docs/control-api.md)
-for multi-device and three-phase experiments.
+and the [EVSE/V2G physical model](docs/evse-model.md) for multi-device and
+three-phase experiments.
 
 Version 0.5 replaces the old `microgrid_env` and `opendss_env` import paths.
 After migrating an existing environment, uninstall the previous distribution
@@ -277,6 +278,9 @@ are resolved from that case, independently of the calling repository.
 
 ## Optional EVSE sessions
 
+The equations, capability projection, loss model, assumptions and research
+references are documented in [EVSE and V2G model](docs/evse-model.md).
+
 Add `files.ev_sessions` and an `evse` device group only in cases that use EVs.
 The session CSV must define `id`, `evse`, `arr`, `dep`, `soc0`, `soct`,
 `cap_kwh`, `eta`, `e_kwh`, and `p_kw`. Exact arrival and departure times are
@@ -290,7 +294,15 @@ energy-equivalent average power for that interval.
     "bus": "bus_002",
     "phases": ["a", "b", "c"],
     "p_max_kw": 22.0,
-    "control_mode": "controlled"
+    "control_mode": "controlled",
+    "v2g": true,
+    "p_discharge_max_kw": 11.0,
+    "soc_min_frac": 0.2,
+    "power_factor": 0.98,
+    "s_max_kva": 25.0,
+    "standby_loss_kw": 0.025,
+    "loss_linear_kw": 0.05,
+    "loss_quadratic_kw": 0.2
   },
   {
     "id": "e067",
@@ -303,19 +315,29 @@ energy-equivalent average power for that interval.
 ```
 
 `asap` EVSEs charge immediately and are omitted from the action. Controlled
-EVSEs require one nonnegative command each. With `step(None)`, controlled
-EVSEs are idle and `asap` EVSEs continue charging.
+EVSEs require one signed net-power command each. Positive power charges and
+negative power discharges to the grid. A negative command requires `v2g: true`;
+V2G is limited by `p_discharge_max_kw`, `soc_min_frac`, session power and the
+energy stored in the vehicle. ASAP charging derives Q from `power_factor`.
+Controlled EVSEs instead receive independent P/Q commands constrained by
+`P² + Q² <= s_max_kva²`. With `step(None)`, controlled EVSEs are idle and
+`asap` EVSEs continue charging.
 
 ```python
-action = Action(evse={"e065": EVSEAction(p_pu=0.022)})
+action = Action(evse={"e065": EVSEAction(p_pu=-0.010, q_pu=0.015)})
 observation, reward, terminated, truncated, info = env.step(action)
 ```
 
 The command remains fixed for the full interval and also applies to a vehicle
-that arrives between samples. Charging is unidirectional and uses unity power
-factor. An `asap` session active at the episode boundary is reconstructed from
-its deterministic prior charging. A controlled carry-in session is rejected
-because its previous actions are unknown.
+that arrives between samples. V2G export reduces SoC using the session
+efficiency and increases the grid energy still required to reach target SoC.
+Converter loss follows
+`P0 + a*(S/Smax) + b*(S/Smax)²`, where `S = sqrt(P² + Q²)`, and also reduces
+SoC. The coefficients are `standby_loss_kw`, `loss_linear_kw` and
+`loss_quadratic_kw`.
+An `asap` session active at the episode boundary is reconstructed from its
+deterministic prior charging. A controlled carry-in session is rejected because
+its previous actions are unknown.
 
 Declare the network meaning in the case configuration:
 
@@ -356,8 +378,9 @@ action.bess["b1"] = PhaseAction(
 This unequal command requires a device configured with `dispatch_mode="per_phase"`.
 An aggregate device accepts total commands or balanced phase commands;
 unequal phase values are rejected instead of silently summed and redistributed.
-P is positive for BESS charging and PV generation, respectively. Q is positive
-for injection. All public action values use pu on the same total network base.
+For both BESS and EVSE, net P is positive for charging and negative for
+discharging. PV generation remains positive. Q is positive for injection. All
+public action values use pu on the same total network base.
 
 The named dictionaries emitted by `Teacher.state_action()` remain supported:
 
@@ -368,6 +391,9 @@ The named dictionaries emitted by `Teacher.state_action()` remain supported:
     },
     "pv": {
         "pv1": {"generation_pu": ..., "q_injection_pu": ...},
+    },
+    "evse": {
+        "e065": {"p_net_pu": ...},
     },
 }
 ```
@@ -380,17 +406,17 @@ base by three. Physical `_kw`/`_kvar` action fields are rejected. The
 `bus_angles_deg`, and grid exchange for the solved snapshot.
 
 `info["device_measurements"]` contains the terminal powers read back from the
-solved OpenDSS circuit, in pu by phase and in aggregate. BESS uses `p_net_pu > 0`
-for charging and `q_injection_pu > 0` for reactive injection. PV uses positive
-`generation_pu` and positive `q_injection_pu` for injection. This makes the
-requested, device-limited, and electrically measured operation independently
-comparable.
+solved OpenDSS circuit, in pu by phase and in aggregate. BESS and EVSE use
+`p_net_pu > 0` for charging and `p_net_pu < 0` for discharging. BESS uses
+`q_injection_pu > 0` for reactive injection. PV uses positive `generation_pu`
+and positive `q_injection_pu` for injection. This makes the requested,
+device-limited, and electrically measured operation independently comparable.
 
-Every controlled BESS and PV must have a command, with valid fields, phases
-and finite values. Validation happens before OpenDSS or any energy state is
-modified. `Action.as_dict()` provides a copy for logging. `step(None)` retains
-the original 24-step reference controls for compatibility; externally driven
-experiments should supply complete actions explicitly.
+Every controlled BESS, PV and EVSE must have a command, with valid fields,
+phases and finite values. Validation happens before OpenDSS or any energy state
+is modified. `Action.as_dict()` provides a copy for logging. `step(None)`
+retains the original 24-step reference controls for compatibility; externally
+driven experiments should supply complete actions explicitly.
 
 Each step runs on private copies of the device state and histories. Live
 SoC, results and the time index are committed only after the executed power
@@ -407,7 +433,7 @@ corresponding line-to-line voltage. The BESS keeps one shared SoC and aggregate
 charge/discharge limits in either dispatch mode.
 
 `env.observe()` returns a named pre-action observation with
-`observation_schema_version: 2`, `units: "pu"`, `base`,
+`observation_schema_version: 4`, `units: "pu"`, `base`,
 `phase_power_base: "total_network"`, `timestamp`,
 `dt_h`, phase order, bus voltage/angle/load by phase, grid prices, BESS SoC and
 previous terminal powers, and PV availability and previous terminal powers.
@@ -614,6 +640,10 @@ negative executed grid cost, with import billed at the buy price and export
 credited at `sell_price_per_kwh` when present in the price CSV. Otherwise,
 the sell price is the buy price times `grid.feed_in_tariff_ratio`.
 
+For named controller rewards, teacher-aligned objectives, V2G terms and dynamic
+incentives, see [Reward configuration and formulas](docs/rewards.md).
+Every step exposes the evaluated scores in `info["rewards"]`.
+
 ```python
 from opendss_environment import EnvironmentConfig, MicrogridEnv, Reward
 
@@ -622,8 +652,8 @@ config = EnvironmentConfig(case_path, reward_function=reward)
 env = MicrogridEnv(config)
 ```
 
-Calling the instance uses cost only. Secondary objectives are available as
-methods and are not silently added to the reward:
+Calling an instance returns its selected global objective (cost by default).
+Secondary objectives are available as methods and are not silently added:
 
 | Method | Return value |
 |---|---|

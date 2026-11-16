@@ -30,6 +30,7 @@ class EVSETest(unittest.TestCase):
         immediate = info["executed_action"]["evse"]["a1"]
         self.assertAlmostEqual(controlled["energy_delivered_kwh"], 4.0 / 3.0)
         self.assertAlmostEqual(controlled["p_net_total_pu"], 0.05333333333333334)
+        self.assertAlmostEqual(controlled["q_injection_total_pu"], 0.0)
         self.assertAlmostEqual(immediate["energy_delivered_kwh"], 1.0)
         self.assertAlmostEqual(immediate["p_net_total_pu"], 0.04)
         self.assertTrue(state["evse"]["c1"]["connected"])
@@ -56,8 +57,70 @@ class EVSETest(unittest.TestCase):
         env, _ = self.make_env()
         with self.assertRaisesRegex(ValueError, "controlled"):
             env.step(Action(evse={"a1": EVSEAction(0.01)}))
-        with self.assertRaisesRegex(ValueError, "nonnegative"):
+        env.evse_list[0].v2g = False
+        with self.assertRaisesRegex(ValueError, "V2G"):
             env.step(Action(evse={"c1": EVSEAction(-0.01)}))
+
+    def test_v2g_uses_negative_net_power_and_restores_required_energy(self):
+        env, _ = self.make_env()
+        state, _, _, _, info = env.step(Action(evse={"c1": EVSEAction(-0.08, 0.06)}))
+        executed = info["executed_action"]["evse"]["c1"]
+        self.assertAlmostEqual(executed["p_net_total_pu"], -0.05333333333333334)
+        self.assertAlmostEqual(executed["q_injection_total_pu"], 0.04)
+        self.assertAlmostEqual(executed["energy_discharged_kwh"], 4.0 / 3.0)
+        self.assertAlmostEqual(executed["net_energy_kwh"], -4.0 / 3.0)
+        self.assertAlmostEqual(state["evse"]["c1"]["soc_before_frac"], 2.0 / 3.0)
+        self.assertAlmostEqual(state["evse"]["c1"]["remaining_energy_kwh"], 10.0 / 3.0)
+        self.assertLess(
+            state["evse"]["c1"]["power_bounds"]["p_net_pu"]["min"]["a"],
+            0.0,
+        )
+
+    def test_v2g_stops_at_the_configured_minimum_soc(self):
+        session = EVSessionConfig(
+            11, pd.Timestamp("2026-01-01 00:00:00", tz="UTC"),
+            pd.Timestamp("2026-01-01 02:00:00", tz="UTC"),
+            0.6, 0.9, 10.0, 0.9, 10.0 / 3.0, 4.0,
+        )
+        evse = EVSE(EVSEConfig(
+            "v", "load", 4.0, "controlled", v2g=True,
+            p_discharge_max_kw=4.0, soc_min_frac=0.5,
+        ), [session])
+        result = evse.operate(
+            pd.Timestamp("2026-01-01 00:00:00", tz="UTC"),
+            pd.Timestamp("2026-01-01 01:00:00", tz="UTC"),
+            -4.0,
+        )
+        self.assertAlmostEqual(result["energy_discharged_kwh"], 0.9)
+        self.assertAlmostEqual(result["p_net_total_kw"], -0.9)
+        self.assertAlmostEqual(evse.sessions[0].soc, 0.5)
+        self.assertAlmostEqual(evse.sessions[0].remaining_kwh, 40.0 / 9.0)
+
+    def test_independent_pq_respects_converter_capability_and_losses(self):
+        session = EVSessionConfig(
+            12, pd.Timestamp("2026-01-01 00:00:00", tz="UTC"),
+            pd.Timestamp("2026-01-01 02:00:00", tz="UTC"),
+            0.5, 0.9, 10.0, 1.0, 4.0, 4.0,
+        )
+        evse = EVSE(EVSEConfig(
+            "pq", "load", 4.0, "controlled", s_max_kva=5.0,
+            standby_loss_kw=0.1, loss_linear_kw=0.2,
+            loss_quadratic_kw=0.3,
+        ), [session])
+        result = evse.operate(
+            pd.Timestamp("2026-01-01 00:00:00", tz="UTC"),
+            pd.Timestamp("2026-01-01 01:00:00", tz="UTC"),
+            3.0, 4.0,
+        )
+        self.assertAlmostEqual(result["p_net_total_kw"], 3.0)
+        self.assertAlmostEqual(result["q_injection_total_kvar"], 4.0)
+        self.assertAlmostEqual(result["conversion_loss_kwh"], 0.6)
+        self.assertAlmostEqual(evse.sessions[0].soc, 0.74)
+        self.assertAlmostEqual(evse.sessions[0].remaining_kwh, 1.6)
+
+        limited_p, limited_q = evse.limit_setpoint(4.0, 4.0, 4.0)
+        self.assertAlmostEqual(limited_p, 4.0)
+        self.assertAlmostEqual(limited_q, 3.0)
 
     def test_power_flow_failure_rolls_back_sessions(self):
         env, before = self.make_env()
@@ -82,6 +145,7 @@ class EVSETest(unittest.TestCase):
         adapter = GymAdapter(env, devices={"evse": ["c1"]})
         observation, _ = adapter.reset()
         self.assertEqual(observation.shape, adapter.observation_space.shape)
+        self.assertAlmostEqual(adapter.action_space.low[0], -0.08)
         _, _, _, _, info = adapter.step(np.array([0.08, 0.0]))
         self.assertAlmostEqual(
             info["executed_action"]["evse"]["c1"]["energy_delivered_kwh"],

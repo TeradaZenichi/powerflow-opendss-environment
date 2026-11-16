@@ -52,7 +52,7 @@ class ObservationApiTest(unittest.TestCase):
         self.assertIsInstance(observation, dict)
         self.assertEqual(observation, env.observe())
         self.assertEqual(observation, info["observation"])
-        self.assertEqual(observation["observation_schema_version"], 2)
+        self.assertEqual(observation["observation_schema_version"], 4)
         self.assertEqual(observation["timestamp"], "2026-01-01T00:00:00")
         self.assertAlmostEqual(sum(observation["buses"]["bus_002"]["p_load_pu"].values()), 0.1)
         self.assertAlmostEqual(observation["bess"]["b1"]["soc_before_frac"], 0.5)

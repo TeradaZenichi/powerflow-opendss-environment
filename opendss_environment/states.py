@@ -5,7 +5,7 @@ from .evse import utc_timestamp
 from .network import PHASE_NAME as _PHASE_NAME, device_phases as _phase_names
 
 
-OBSERVATION_SCHEMA_VERSION = 2
+OBSERVATION_SCHEMA_VERSION = 4
 LOCAL_OBSERVATION_SCHEMA_VERSION = 1
 CONTROLLER_OBSERVATION_SCHEMA_VERSION = 1
 LOCAL_OBSERVATION_SECTIONS = ("device", "bus", "branches", "grid")
@@ -172,21 +172,41 @@ def build_named_observation(env):
             phases = _phase_names(device, env.data["phases"])
             session = device.current_session(timestamp)
             measured = env.current_device_measurements["evse"].get(device.id, {})
-            available_kw = 0.0 if session is None or session.remaining_kwh <= 0.0 else min(
+            charge_max_kw = 0.0 if session is None or session.remaining_kwh <= 0.0 else min(
                 device.p_max_kw, session.config.rated_power_kw
             )
+            discharge_max_kw = 0.0
+            if session is not None and device.v2g:
+                energy_limit_kw = max(
+                    (session.soc - device.soc_min_frac)
+                    * session.config.capacity_kwh * session.config.efficiency / env.dt,
+                    0.0,
+                )
+                discharge_max_kw = min(
+                    device.p_discharge_max_kw,
+                    session.config.rated_power_kw,
+                    energy_limit_kw,
+                )
             values = {
                 "controlled": device.controlled,
+                "v2g": device.v2g,
+                "power_factor": device.power_factor,
                 "connected": session is not None,
                 "carry_in": session is not None and session.carry_in,
                 "session_id": 0 if session is None else session.config.id,
                 "soc_before_frac": 0.0 if session is None else float(session.soc),
-                "available_kw": dict.fromkeys(
-                    phases,
-                    available_kw / len(phases),
-                ),
+                "power_bounds": {"p_net_kw": {
+                    "min": dict.fromkeys(phases, -discharge_max_kw / len(phases)),
+                    "max": dict.fromkeys(phases, charge_max_kw / len(phases)),
+                }, "q_injection_kvar": {
+                    "min": dict.fromkeys(phases, -device.s_max_kva / len(phases)),
+                    "max": dict.fromkeys(phases, device.s_max_kva / len(phases)),
+                }},
                 "previous_p_kw": _phase_values(
                     measured.get("p_net_kw", {}), phases
+                ),
+                "previous_q_kvar": _phase_values(
+                    measured.get("q_injection_kvar", {}), phases
                 ),
             }
             if information in {"target", "target_deadline"}:

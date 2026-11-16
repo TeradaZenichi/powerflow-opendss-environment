@@ -92,6 +92,7 @@ class MicrogridEnv(gym.Env):
         self.idx = 0
         self.current_cost = 0.0
         self.episode_reward = 0.0
+        self.reward_objectives = {}
         groups = {"bess": {}, "pv": {}}
         if getattr(self, "evse_list", []):
             groups["evse"] = {}
@@ -143,6 +144,7 @@ class MicrogridEnv(gym.Env):
     def _copy_for_step(self):
         """Stage mutable simulation data while retaining the external DSS context."""
         pending = copy(self)
+        pending.reward_objectives = deepcopy(self.reward_objectives)
         pending.bess_list, pending.pv_list, pending.evse_list, pending.grid, pending.results = deepcopy(
             (self.bess_list, self.pv_list, self.evse_list, self.grid, self.results)
         )
@@ -150,6 +152,7 @@ class MicrogridEnv(gym.Env):
 
     def _run_step(self, prepared):
         observation = self.observe()
+        objectives = deepcopy(self.reward_objectives)
         applied_action = _update_snapshot_powers(self, prepared.physical)
         grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
 
@@ -160,7 +163,10 @@ class MicrogridEnv(gym.Env):
             **{name: len(diagnostics[name]) for name in ("voltage_violations", "branch_overloads", "grid_excess_pu")},
             "unrated_branch_terminals": diagnostics["unrated_branch_terminals"],
         })
-        reward = self.reward_function(self)
+        evaluator = self.reward_function if isinstance(self.reward_function, Reward) else Reward()
+        rewards = evaluator.evaluate(self, objectives)
+        reward = rewards["global"] if isinstance(self.reward_function, Reward) else self.reward_function(self)
+        rewards["global"] = reward
         self.episode_reward += reward
         self.idx += 1
 
@@ -175,6 +181,7 @@ class MicrogridEnv(gym.Env):
             "interval_end": (self.timestamps.iloc[self.idx - 1] + timedelta(hours=self.dt)).isoformat(),
             "cost": cost,
             "reward": reward,
+            "rewards": rewards,
             "grid_kw": grid_kw,
             "grid_kvar": grid_kvar,
             "grid_import_kw": max(-grid_kw, 0.0),

@@ -49,6 +49,8 @@ def save_summary(sim_results, output_dir):
         np.sum(pv.array_inverter_loss_kw) for pv in pv_list
     ]) * dt
     ev_delivered_energy = sum(evse.delivered_kwh for evse in evse_list)
+    ev_discharged_energy = sum(evse.discharged_kwh for evse in evse_list)
+    ev_conversion_loss = sum(evse.conversion_loss_kwh for evse in evse_list)
     ev_prior_energy = sum(evse.energy_before_episode_kwh for evse in evse_list)
     ev_unmet_energy = sum(evse.unmet_kwh for evse in evse_list)
 
@@ -72,6 +74,9 @@ def save_summary(sim_results, output_dir):
             "bess_reactive_loss_kwh": bess_reactive_loss_energy,
             "pv_reactive_loss_kwh": pv_reactive_loss_energy,
             "ev_delivered_kwh": ev_delivered_energy,
+            "ev_discharged_kwh": ev_discharged_energy,
+            "ev_net_kwh": ev_delivered_energy - ev_discharged_energy,
+            "ev_conversion_loss_kwh": ev_conversion_loss,
             "ev_before_episode_kwh": ev_prior_energy,
             "ev_unmet_kwh": ev_unmet_energy,
         },
@@ -127,7 +132,11 @@ def save_summary(sim_results, output_dir):
 
     for evse in evse_list:
         devices_data[f"evse_{evse.id}_p_net_kw"] = np.asarray(evse.array_kw)
+        devices_data[f"evse_{evse.id}_q_injection_kvar"] = np.asarray(evse.array_kvar)
         devices_data[f"evse_{evse.id}_energy_kwh"] = np.asarray(evse.array_energy_kwh)
+        devices_data[f"evse_{evse.id}_charge_kwh"] = np.asarray(evse.array_charge_kwh)
+        devices_data[f"evse_{evse.id}_discharge_kwh"] = np.asarray(evse.array_discharge_kwh)
+        devices_data[f"evse_{evse.id}_conversion_loss_kw"] = np.asarray(evse.array_loss_kw)
         devices_data[f"evse_{evse.id}_connected_fraction"] = np.asarray(
             evse.array_connected_fraction
         )

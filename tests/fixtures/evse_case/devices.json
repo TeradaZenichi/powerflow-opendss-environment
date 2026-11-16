@@ -7,14 +7,19 @@
       "bus": "load",
       "phases": ["a"],
       "p_max_kw": 12.0,
-      "control_mode": "controlled"
+      "control_mode": "controlled",
+      "v2g": true,
+      "p_discharge_max_kw": 8.0,
+      "soc_min_frac": 0.5,
+      "power_factor": 0.8
     },
     {
       "id": "a1",
       "bus": "load",
       "phases": ["b"],
       "p_max_kw": 6.0,
-      "control_mode": "asap"
+      "control_mode": "asap",
+      "power_factor": 0.9
     }
   ]
 }

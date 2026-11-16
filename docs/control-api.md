@@ -1,5 +1,8 @@
 # Profiles, reporting and RL integration
 
+For EVSE actions, V2G, SoC integration and internal converter losses, see the
+[EVSE and V2G model](evse-model.md).
+
 ## Device profiles
 
 Each PV's `profile` in `devices.json` is an explicit `file.csv:column` reference.

@@ -260,7 +260,8 @@ def prepare_pre_action_observation(env):
     _set_loads(env)
     timestamp = utc_timestamp(env.timestamps.iloc[env.idx])
     for evse in env.evse_list:
-        DssDevice(env, evse, "Load").edit(evse.preview_power(timestamp), 0.0)
+        power, reactive = evse.preview_setpoint(timestamp)
+        DssDevice(env, evse, "Load").edit(power, -reactive)
     controls = []
     previous = _current_snapshot(env)
     if env.idx > 0:
@@ -478,18 +479,22 @@ def _apply_bess(env, bess, action):
 
 def _apply_evse(env, evse, action):
     command_kw = 0.0
+    q_command_kvar = 0.0
     if evse.controlled and action is not None:
-        command_kw = _aggregate(_device_command(action, "evse", evse)["p_net_kw"])
+        command = _device_command(action, "evse", evse)
+        command_kw = _aggregate(command["p_net_kw"])
+        q_command_kvar = _aggregate(command.get("q_injection_kvar", 0.0))
     start = utc_timestamp(env.timestamps.iloc[env.idx])
     end = start + timedelta(hours=env.dt)
-    result = evse.operate(start, end, command_kw)
+    result = evse.operate(start, end, command_kw, q_command_kvar)
     phases = _device_phases(evse, env.data["phases"])
     p_by_phase = _phase_result(result["p_net_total_kw"], phases, len(phases))
-    DssDevice(env, evse, "Load").edit(result["p_net_total_kw"], 0.0)
+    q_total = result["q_injection_total_kvar"]
+    q_by_phase = _phase_result(q_total, phases, len(phases))
+    DssDevice(env, evse, "Load").edit(result["p_net_total_kw"], -q_total)
     return {
         "p_net_kw": p_by_phase,
-        "q_injection_kvar": dict.fromkeys(phases, 0.0),
-        "q_injection_total_kvar": 0.0,
+        "q_injection_kvar": q_by_phase,
         **result,
     }
 

@@ -22,9 +22,10 @@ class PhaseAction:
 
 @dataclass
 class EVSEAction:
-    """Charging power for a controlled EVSE; negative power is not supported."""
+    """Independent EVSE P/Q command; P is positive for charging."""
 
     p_pu: float
+    q_pu: float = 0.0
 
 
 @dataclass
@@ -57,7 +58,10 @@ class Action:
             for device_id, command in self.evse.items():
                 if not isinstance(command, EVSEAction):
                     raise TypeError("EVSE actions must be EVSEAction objects")
-                values["evse"][device_id] = {"p_net_pu": command.p_pu}
+                values["evse"][device_id] = {
+                    "p_net_pu": command.p_pu,
+                    "q_injection_pu": command.q_pu,
+                }
         return values
 
 
@@ -154,10 +158,17 @@ def prepare_action(env, action):
         commands["evse"] = {}
         for device in controlled:
             command = group[device.id]
-            if not isinstance(command, dict) or set(command) != {"p_net_pu"}:
-                raise ValueError("EVSE action requires only p_net_pu")
+            if (
+                not isinstance(command, dict)
+                or set(command) - {"p_net_pu", "q_injection_pu"}
+                or "p_net_pu" not in command
+            ):
+                raise ValueError("EVSE action requires p_net_pu and optional q_injection_pu")
             power = _finite_power(command["p_net_pu"])
-            if power < 0.0:
-                raise ValueError("EVSE charging power must be nonnegative")
-            commands["evse"][device.id] = {"p_net_pu": power}
+            reactive = _finite_power(command.get("q_injection_pu", 0.0))
+            if power < 0.0 and not device.v2g:
+                raise ValueError(f"V2G is not enabled for EVSE {device.id!r}")
+            commands["evse"][device.id] = {
+                "p_net_pu": power, "q_injection_pu": reactive,
+            }
     return PreparedAction(requested, env.normalizer.denormalize(commands))

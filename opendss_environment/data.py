@@ -313,7 +313,8 @@ def _validate_device_modes(devices):
             raise ValueError("EVSE connection must be 'wye'")
         if str(device.get("dispatch_mode", "aggregate")).lower() != "aggregate":
             raise ValueError("EVSE dispatch_mode must be 'aggregate'")
-        if str(device.get("control_mode", "")) not in {"controlled", "asap"}:
+        control_mode = str(device.get("control_mode", ""))
+        if control_mode not in {"controlled", "asap"}:
             raise ValueError("EVSE control_mode must be 'controlled' or 'asap'")
         power = device.get("p_max_kw")
         if (
@@ -321,3 +322,41 @@ def _validate_device_modes(devices):
             or not np.isfinite(float(power)) or float(power) <= 0.0
         ):
             raise ValueError("EVSE p_max_kw must be finite and positive")
+        v2g = device.get("v2g", False)
+        if not isinstance(v2g, bool):
+            raise ValueError("EVSE v2g must be boolean")
+        if v2g and control_mode != "controlled":
+            raise ValueError("V2G requires a controlled EVSE")
+        discharge_power = device.get("p_discharge_max_kw", power)
+        if (
+            isinstance(discharge_power, bool) or discharge_power is None
+            or not np.isfinite(float(discharge_power))
+            or float(discharge_power) <= 0.0
+        ):
+            raise ValueError("EVSE p_discharge_max_kw must be finite and positive")
+        soc_min = device.get("soc_min_frac", 0.0)
+        if (
+            isinstance(soc_min, bool) or not np.isfinite(float(soc_min))
+            or not 0.0 <= float(soc_min) <= 1.0
+        ):
+            raise ValueError("EVSE soc_min_frac must be between zero and one")
+        power_factor = device.get("power_factor", 1.0)
+        if (
+            isinstance(power_factor, bool) or not np.isfinite(float(power_factor))
+            or not 0.0 < float(power_factor) <= 1.0
+        ):
+            raise ValueError("EVSE power_factor must be in (0, 1]")
+        apparent_power = device.get("s_max_kva", float(power) / float(power_factor))
+        if (
+            isinstance(apparent_power, bool) or apparent_power is None
+            or not np.isfinite(float(apparent_power))
+            or float(apparent_power) < max(float(power), float(discharge_power))
+        ):
+            raise ValueError("EVSE s_max_kva must cover charge and discharge power")
+        for field in ("standby_loss_kw", "loss_linear_kw", "loss_quadratic_kw"):
+            value = device.get(field, 0.0)
+            if (
+                isinstance(value, bool) or not np.isfinite(float(value))
+                or float(value) < 0.0
+            ):
+                raise ValueError(f"EVSE {field} must be finite and nonnegative")
