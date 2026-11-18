@@ -560,6 +560,28 @@ When `reset()` is called, the environment:
 3. initializes the result arrays;
 4. builds the initial state.
 
+Reuse one environment for nonconsecutive windows without reloading the scenario:
+
+```python
+observation, info = env.reset(options={"start_step": 2400, "episode_steps": 672})
+```
+
+`start_step` is an absolute row in the complete chronological dataset. The window
+is `[start_step, start_step + episode_steps)`. Overrides apply only to this reset;
+an ordinary `reset()` returns to the original `EnvironmentConfig` window.
+Omitted length uses the configured length; `episode_steps=None` uses all remaining
+rows. `info` includes the selected `start_step` and `episode_steps`.
+The original `options={"episode_idx": k}` interface remains available; an explicit
+`start_step` takes precedence over episode indexing. Loads, PV, tariffs and EV
+sessions follow the selected window. BESS SoC, device state and results are
+reinitialized, not carried from the previous episode. Existing EV rules remain:
+ASAP carry-in is reconstructed; starting inside a controlled session is rejected.
+
+Use a separate `MicrogridEnv` for validation/evaluation so its resets and actions
+do not change training state. Each instance owns its OpenDSS context. Reset the
+policy's observation history separately for each episode, and keep evaluation
+transitions out of the training replay buffer.
+
 ## Step
 
 At each `step(action)`, the environment:

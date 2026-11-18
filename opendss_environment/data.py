@@ -179,10 +179,11 @@ def load_data(path):
         ),
     }
 
-def episode_data(data, episode_idx, episode_steps):
+def episode_data(data, episode_idx, episode_steps, *, start_step=None):
     """Build devices and profiles for one episode."""
 
-    episode_start = data.get("start_step", 0) + episode_idx * episode_steps
+    episode_start = (data.get("start_step", 0) + episode_idx * episode_steps
+                     if start_step is None else start_step)
     episode_end = episode_start + episode_steps
 
     if episode_end > data["steps"]:

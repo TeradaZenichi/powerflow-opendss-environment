@@ -55,6 +55,7 @@ class MicrogridEnv(gym.Env):
             raise TypeError("MicrogridEnv requires an EnvironmentConfig")
 
         self.case_path = config.case_path
+        self.config = config
         self.episode_steps = config.episode_steps
         self.start_episode = config.start_episode
         self.num_episodes = config.num_episodes
@@ -80,8 +81,10 @@ class MicrogridEnv(gym.Env):
         self.load_episode_data(self.start_episode)
         _simulation_setup(self)
 
-    def load_episode_data(self, episode_idx):
-        episode = episode_data(self.data, episode_idx, self.episode_steps)
+    def load_episode_data(self, episode_idx, *, start_step=None, episode_steps=None):
+        steps = self.episode_steps if episode_steps is None else episode_steps
+        episode = episode_data(self.data, episode_idx, steps, start_step=start_step)
+        self.episode_steps = steps
 
         for name in (
             "dt", "steps", "timestamps", "grid", "bess_list", "pv_list",
@@ -105,12 +108,19 @@ class MicrogridEnv(gym.Env):
         super().reset(seed=seed)
         self._needs_reset = True
 
-        episode_idx = options.get("episode_idx", 0) if options else 0
+        options = options or {}
+        episode_idx = options.get("episode_idx", 0)
 
         if episode_idx >= self.num_episodes:
             episode_idx = 0
 
-        self.load_episode_data(self.start_episode + episode_idx)
+        default_steps = self.config.episode_steps or self.data["steps"] - self.data["start_step"]
+        start = options.get("start_step", self.data["start_step"] +
+                            (self.start_episode + episode_idx) * default_steps)
+        steps = options.get("episode_steps", self.config.episode_steps)
+        window = EnvironmentConfig(self.case_path, self.data["steps"] - start if steps is None else steps,
+                                   start_step=start)
+        self.load_episode_data(0, start_step=window.start_step, episode_steps=window.episode_steps)
 
         self._clear_episode_state()
 
@@ -124,7 +134,7 @@ class MicrogridEnv(gym.Env):
         observation = self.observe()
         state = build_state(self, self.state_functions) if self.state_functions else observation
 
-        return state, {"observation": deepcopy(observation)}
+        return state, {"observation": deepcopy(observation), "start_step": start, "episode_steps": self.steps}
 
     def step(self, action=None):
         if self._needs_reset:
