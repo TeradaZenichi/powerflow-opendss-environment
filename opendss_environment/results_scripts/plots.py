@@ -24,7 +24,7 @@ def _figure(results, title, ylabel):
     hours = np.arange(results["steps"]) * results["dt"]
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.set(title=title, xlabel="Elapsed time [h]", ylabel=ylabel)
-    ax.set_xlim(-results["dt"] / 2, hours[-1] + results["dt"] / 2)
+    ax.set_xlim(0, results["steps"] * results["dt"])
     ax.grid(color="lightgrey")
     ax.set_axisbelow(True)
     return fig, ax, hours
@@ -43,13 +43,10 @@ def _total(devices, field, steps):
     return sum((np.asarray(getattr(device, field)) for device in devices), np.zeros(steps))
 
 
-def _stack_bottoms(*series):
-    """Stack positive and negative powers on their respective sides of zero."""
-    data = np.vstack(series)
-    positive = np.maximum(data, 0)
-    negative = np.minimum(data, 0)
-    return np.where(data >= 0, np.cumsum(positive, axis=0) - positive,
-                    np.cumsum(negative, axis=0) - negative)
+def _step(ax, hours, values, dt, **style):
+    """Hold interval measurements through the final interval's end."""
+    return ax.step(np.append(hours, hours[-1] + dt), np.append(values, values[-1]),
+                   where="post", **style)[0]
 
 
 def _plot_power(results, output_dir, reactive):
@@ -63,11 +60,10 @@ def _plot_power(results, output_dir, reactive):
     bess = _total(results["bess_list"], field, results["steps"])
     grid = np.asarray(getattr(results["grid"], field)) * (1 if reactive else -1)
     ax.axhline(0, color="black", linestyle="-.")
-    ax.plot(hours, load, color="black", label="Load")
-    series = (pv, grid, bess)
-    for values, bottom, color, label in zip(series, _stack_bottoms(*series),
-                                            ("gold", "hotpink", "blueviolet"), ("PV", "Grid", "BESS")):
-        ax.bar(hours, values, width=0.9 * results["dt"], bottom=bottom, color=color, label=label)
+    for values, color, label in ((load, "black", "Load"), (pv, "gold", "PV"), (grid, "hotpink", "Grid")):
+        _step(ax, hours, values, results["dt"], color=color, label=label)
+    if results["bess_list"]:
+        ax.bar(hours, bess, width=0.9 * results["dt"], align="edge", color="blueviolet", label="BESS")
     _save(fig, ax, output_dir / filename)
 
 
@@ -78,13 +74,13 @@ def _plot_voltages(results, output_dir, per_unit):
     fig, ax, hours = _figure(results, "Bus voltage magnitude", f"Voltage [{unit}]")
     for bus, phases in getattr(results["results"], field).items():
         for phase, values in phases.items():
-            ax.plot(hours, values, linewidth=1, label=f"{bus}/{phase}")
+            _step(ax, hours, values, results["dt"], linewidth=1, label=f"{bus}/{phase}")
     _save(fig, ax, output_dir / filename)
 
 
 def _plot_costs(results, output_dir):
     fig, ax, hours = _figure(results, "Energy cost per interval", "Cost [currency units]")
-    ax.bar(hours, results["results"].costs, width=0.9 * results["dt"], color="hotpink")
+    _step(ax, hours, results["results"].costs, results["dt"], color="hotpink")
     _save(fig, ax, output_dir / "hourly_cost_plot.png")
 
 
@@ -94,8 +90,8 @@ def _plot_battery(results, output_dir, energy):
     filename = "bess_energy_plot.png" if energy else "bess_soc_plot.png"
     fig, ax, hours = _figure(results, title, f"{title} [{unit}]")
     for bess in results["bess_list"]:
-        values = np.asarray(bess.array_soc) * (bess.e_cap_kwh if energy else 100)
-        ax.plot(hours, values, label=f"BESS {bess.id}")
+        values = np.asarray([bess.soc_init_frac, *bess.array_soc]) * (bess.e_cap_kwh if energy else 100)
+        ax.step(np.append(0, hours + results["dt"]), values, where="post", label=f"BESS {bess.id}")
     if not results["bess_list"]:
         ax.text(0.5, 0.5, "No BESS in this scenario", ha="center", transform=ax.transAxes)
     _save(fig, ax, output_dir / filename)
@@ -105,8 +101,8 @@ def _plot_price_grid_import(results, output_dir):
     fig, ax, hours = _figure(results, "Electricity price and net grid import", "Price [currency/kWh]")
     energy_axis = ax.twinx()
     energy = -np.asarray(results["grid"].array_kw) * results["dt"]
-    price_line, = ax.step(hours, results["grid"].prices, where="post", color="dodgerblue", label="Price")
-    energy_line, = energy_axis.step(hours, energy, where="post", color="hotpink", label="Net grid import")
+    price_line = _step(ax, hours, results["grid"].prices, results["dt"], color="dodgerblue", label="Price")
+    energy_line = _step(energy_axis, hours, energy, results["dt"], color="hotpink", label="Net grid import")
     energy_axis.set_ylabel("Net imported energy per interval [kWh]")
     energy_axis.legend(handles=[price_line, energy_line], loc="upper right")
     price_line.set_label("_nolegend_")

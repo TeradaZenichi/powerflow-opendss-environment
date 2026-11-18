@@ -74,6 +74,11 @@ def load_data(path):
 
     # circuit and line data
     topology = path / cfg["network"]["master"]
+    load_bus_map = cfg["network"].get("load_bus_map", {})
+    if not isinstance(load_bus_map, dict) or any(
+            not isinstance(bus, str) or not bus or not isinstance(target, str) or not target
+            for bus, target in load_bus_map.items()):
+        raise ValueError("network.load_bus_map must map bus names to bus names")
 
     representation = cfg["network"].get("representation")
     if representation is None:
@@ -158,6 +163,7 @@ def load_data(path):
         "base_kv": base_kv,
         "base_kva": base_kva,
         "topology": topology,
+        "load_bus_map": load_bus_map,
         "devices": devices,
         "pv_profiles": pv_profiles,
         "pv_phase_profiles": pv_phase_profiles,
@@ -220,7 +226,7 @@ def episode_data(data, episode_idx, episode_steps):
         load_list.append(
             Load(
                 id=f"Load_{bus}" + (f"_{phase.lower()}" if phase else ""),
-                bus=bus,
+                bus=data.get("load_bus_map", {}).get(bus, bus),
                 array_kw=data["demand"][col].to_numpy()[window],
                 array_kvar=data["demand"][q_col].to_numpy()[window],
                 phase_node=phase_node,

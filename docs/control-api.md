@@ -5,6 +5,17 @@ For EVSE actions, V2G, SoC integration and internal converter losses, see the
 
 ## Device profiles
 
+An optional `network.load_bus_map` maps demand CSV bus names to physical buses,
+for example `{"bus_002": "bus_002_lv"}`. Only the load's connection changes:
+IDs, phase assignments, timestamps and P/Q profiles retain their source meaning.
+Unmapped buses retain their original names. This permits adding MV/LV
+transformers without rewriting historical CSVs. EVSE/PV/BESS connections remain
+explicit in `devices.json`; their bus fields are not remapped.
+
+Declare all nominal voltage levels in the DSS `Set VoltageBases` command and
+run `CalcVoltageBases`. Three-phase voltage measurements use each OpenDSS bus's
+local base, while action powers share the scenario's network power base.
+
 Each PV's `profile` in `devices.json` is an explicit `file.csv:column` reference.
 Use `pv.csv:pv1` and `pv.csv:pv2` for separate columns in one file, or separate
 files with the same column name. Profiles are stored by device ID, so neither

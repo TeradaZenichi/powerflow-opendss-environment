@@ -418,12 +418,14 @@ is modified. `Action.as_dict()` provides a copy for logging. `step(None)`
 retains the original 24-step reference controls for compatibility; externally
 driven experiments should supply complete actions explicitly.
 
-Each step runs on private copies of the device state and histories. Live
-SoC, results and the time index are committed only after the executed power
-flow, reward and next observation succeed. If execution fails, these remain
-at the last successful step. Call `reset()` before using `step()` or `observe()`
-again, because the external OpenDSS circuit may have changed. A command rejected
-by validation does not require a reset.
+Each step keeps a small checkpoint of device state, overlapping EV sessions,
+history lengths and the voltage entries written in that interval. It avoids
+copying the full episode at every step. If the power flow, reward or next
+observation fails, SoC, histories and the time index return to the last
+successful step. Reward and state callbacks must treat simulation data and
+past histories as read-only. Call `reset()` before using `step()` or `observe()`
+again after an execution failure, because the external OpenDSS circuit may
+have changed. A command rejected by validation does not require a reset.
 
 Set `dispatch_mode` to `aggregate` for balanced device operation or
 `per_phase` to create one OpenDSS element per phase. Both `wye` and three-phase
@@ -643,6 +645,10 @@ the sell price is the buy price times `grid.feed_in_tariff_ratio`.
 For named controller rewards, teacher-aligned objectives, V2G terms and dynamic
 incentives, see [Reward configuration and formulas](docs/rewards.md).
 Every step exposes the evaluated scores in `info["rewards"]`.
+`info["costs"]` also exposes the actual feeder bill and enabled controller-level
+`node_cost` / `device_cost` amounts, before reward weighting or sign changes.
+Node/device tariffs, optional storage wear and service payments are described
+in the same reward documentation; these accounts do not change the feeder bill.
 
 ```python
 from opendss_environment import EnvironmentConfig, MicrogridEnv, Reward
@@ -724,6 +730,10 @@ outputs/
 ```
 
 ## Plots
+
+Time series use post-step curves; dispatched BESS active/reactive power uses bars
+aligned with interval starts. Battery energy/SoC include the initial state and
+the measurements at interval ends.
 
 The `plots.py` script generates plots for the main electrical and operational quantities, including:
 

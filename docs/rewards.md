@@ -7,6 +7,10 @@ time index. The environment returns a scalar as before, plus `info["rewards"]`:
 {
     "global": ...,                 # Selected scalar, or the legacy callable result.
     "cost": ...,                   # Negative actual grid energy cost.
+    "costs": {                     # Currency amounts, before reward sign/weights/scales.
+        "feeder": ...,
+        "controllers": {"battery": {"node": ...}},
+    },
     "teacher": ...,                # Negative selected teacher objective.
     "teacher_terms": {
         "energy_cost": ..., "tie_break_cost": ...,
@@ -31,8 +35,8 @@ CONTROLLERS = {
     "battery": {
         "devices": {"bess": ["b1"]},
         "buses": ["bus_004"],
-        "weights": {"voltage": 1.0, "energy_cost": 1.0, "throughput": 0.1},
-        "scales": {"voltage": 0.01, "energy_cost": 1.0, "throughput": 10.0},
+        "weights": {"voltage": 1.0, "node_cost": 1.0, "throughput": 0.1},
+        "scales": {"voltage": 0.01, "node_cost": 1.0, "throughput": 10.0},
         "parameters": {"voltage": {"v_min": 0.95, "v_max": 1.05}},
     },
     "solar": {
@@ -51,14 +55,15 @@ env = MicrogridEnv(EnvironmentConfig("examples/case5", episode_steps=2, reward_f
 observation, _ = env.reset()
 observation, global_reward, terminated, truncated, info = env.step(None)
 
-cost = REWARD.get_cost(info["rewards"])
+cost_reward = REWARD.get_cost(info["rewards"])
+costs = REWARD.get_costs(info["rewards"])
 teacher = REWARD.get_teacher(info["rewards"])
 battery = REWARD.get_local(info["rewards"], "battery")
 terms = REWARD.get_terms(info["rewards"], "battery")
 env.close()
 ```
 
-`get_global()`, `get_cost()`, `get_teacher()`, `get_local()` and `get_terms()`
+`get_global()`, `get_cost()`, `get_costs()`, `get_teacher()`, `get_local()` and `get_terms()`
 only extract an existing result. `get_terms()` returns a private copy. The
 environment calls `evaluate(env, objectives)` once; users do not call it again
 after `step()`, when the environment already points to the next interval.
@@ -98,6 +103,84 @@ finite and positive; weights must be finite and nonnegative. Terms with zero
 weight are disabled and recorded with raw/contribution zero. Configuration
 errors reject the reward evaluation; failed steps do not commit device state.
 
+## Feeder, node and device costs
+
+These are separate accounting boundaries. Positive cost is expense; negative
+cost is net revenue. Their reward terms are the negative of these amounts.
+All costs use executed AC measurements and the current interval's tariffs.
+They are not automatically added together or added to the external grid bill.
+
+Define `settle(P, buy, sell) = dt * (buy*[P]+ - sell*[-P]+)`, with P positive
+for import, kW, dt in hours, and tariffs in case currency/kWh.
+
+| Cost method / reward term | Boundary and formula |
+|---|---|
+| `feeder_cost` / `feeder_cost` | Actual external-grid bill, `env.current_cost`; exactly the cost already recorded by the simulator |
+| `node_cost` / `node_cost` | `sum_nodes(settle(P_node, buy, sell))`; all loads and devices at each selected node, regardless of the selected device scope |
+| `device_cost` / `device_cost` | `sum_devices(settle(P_device, buy, sell)) + throughput_price*E_cell - service_payment`; each selected device is settled individually |
+
+The corresponding reward methods are `minimize_feeder_cost()`,
+`minimize_node_cost()` and `minimize_device_cost()`. The cost methods return
+currency amounts when called during interval evaluation, before the time index
+advances. `minimize_cost()` and `get_cost()` preserve their existing negative
+grid-cost reward convention.
+
+Node power is the negative sum of its connected branch-terminal active powers.
+This is local consumption/generation, not the incoming branch's downstream
+subtree consumption. At the source node, external-source power is removed
+from this balance: a source node without local loads/devices has zero node cost.
+Phases net within a node/device meter; different selected nodes/devices settle
+separately. This does not allocate feeder losses or the feeder bill to nodes.
+
+Node/device tariffs default to the current grid buy/sell prices. Override them
+independently through each term's `buy_price` and `sell_price` parameters; finite
+negative prices remain supported. Selecting devices does not narrow `node_cost`.
+Select explicit buses for node cost and devices for device cost.
+
+```python
+CONTROLLERS = {
+    "feeder": {"weights": {"feeder_cost": 1.0}},
+    "site": {
+        "buses": ["bus_004"],
+        "weights": {"node_cost": 1.0},
+        "parameters": {"node_cost": {"buy_price": 0.25, "sell_price": 0.05}},
+    },
+    "battery": {
+        "devices": {"bess": ["b1"]},
+        "weights": {"device_cost": 1.0},
+        "parameters": {"device_cost": {"throughput_price": 0.02}},
+    },
+}
+REWARD = Reward(controllers=CONTROLLERS)
+# After env.step(), without evaluating the next interval:
+costs = REWARD.get_costs(info["rewards"])  # Same values as info["costs"].
+feeder_cost = costs["feeder"]
+node_cost = REWARD.get_costs(info["rewards"], "site")["node"]
+device_cost = REWARD.get_costs(info["rewards"], "battery")["device"]
+```
+
+`info["costs"]` always contains the feeder bill. Its `controllers` dictionary
+contains only enabled named cost terms for each controller, before weighting
+and normalization; disabled terms are omitted. Extraction returns private copies
+and does not recompute costs after the environment advances its time index.
+For different tariffs across nodes/devices, configure separate controller scopes.
+
+`throughput_price` is an optional nonnegative currency/cell-kWh wear proxy for
+BESS/EVSE; it defaults to zero and is not a battery aging model. Conversion losses
+already affect AC settlement and cell throughput; they are not priced again.
+`service_payment` is a nonnegative total payment for the selected group in this
+interval, in currency, default zero. Supply it explicitly through term parameters
+or objective overrides; it does not automatically consume the `service` reward.
+
+Choose one energy-settlement boundary for a controller's objective. To combine
+node billing with device wear/services, set the device term's `buy_price=0` and
+`sell_price=0`, retaining its wear/payment parameters. Otherwise summing node and
+device energy costs counts overlapping energy twice. Likewise, do not add a
+`service` reward for a payment already deducted in `device_cost`.
+
+The legacy `energy_cost` term keeps its net device-group settlement behavior;
+it can differ from `device_cost`, which settles each individual meter first.
+
 ## Global and teacher formulas
 
 Let `[x]+ = max(x, 0)`, `dt` be hours, powers be kW/kvar and energies be kWh.
@@ -136,6 +219,9 @@ selected buses/phases unless stated otherwise.
 
 | Term / method | Raw reward and parameters |
 |---|---|
+| `feeder_cost` / `minimize_feeder_cost` | Negative actual external-grid bill; no tariff override |
+| `node_cost` / `minimize_node_cost` | Negative sum of individual selected node bills; optional `buy_price`, `sell_price` |
+| `device_cost` / `minimize_device_cost` | Negative individual device settlements plus wear minus service income; optional `buy_price`, `sell_price`, `throughput_price`, `service_payment` |
 | `voltage` / `minimize_voltage_violation` | `-sum([v_min - V]+ + [V - v_max]+)`; defaults 0.95/1.05 |
 | `voltage_deviation` / `minimize_voltage_deviation` | `-sum(abs(V - reference))`; default reference 1 |
 | `unbalance` / `minimize_voltage_unbalance` | `-sum([100*abs(V_negative)/abs(V_positive) - maximum_pct]+)`; default threshold 0; requires a/b/c |

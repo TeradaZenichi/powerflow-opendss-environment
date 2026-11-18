@@ -15,6 +15,7 @@ from opendss_environment.states import (
 )
 from opendss_environment.rewards import Reward
 from opendss_environment.diagnostics import electrical_diagnostics
+from opendss_environment.step_state import StepCheckpoint
 from opendss_environment.simulation import (
     _simulation_setup,
     _update_snapshot_powers,
@@ -131,10 +132,12 @@ class MicrogridEnv(gym.Env):
         if self.idx >= self.steps:
             raise RuntimeError("The episode has terminated; call reset()")
         prepared = prepare_action(self, action)
+        checkpoint = StepCheckpoint(self)
         pending = self._copy_for_step()
         try:
             result = pending._run_step(prepared)
-        except Exception:
+        except BaseException:
+            checkpoint.restore()
             # OpenDSS may have changed; reset rebuilds it before another attempt.
             self._needs_reset = True
             raise
@@ -142,12 +145,9 @@ class MicrogridEnv(gym.Env):
         return result
 
     def _copy_for_step(self):
-        """Stage mutable simulation data while retaining the external DSS context."""
+        """Stage measurements/index; a checkpoint guards device/history updates."""
         pending = copy(self)
         pending.reward_objectives = deepcopy(self.reward_objectives)
-        pending.bess_list, pending.pv_list, pending.evse_list, pending.grid, pending.results = deepcopy(
-            (self.bess_list, self.pv_list, self.evse_list, self.grid, self.results)
-        )
         return pending
 
     def _run_step(self, prepared):
@@ -180,6 +180,7 @@ class MicrogridEnv(gym.Env):
             "timestamp": self.timestamps.iloc[self.idx - 1],
             "interval_end": (self.timestamps.iloc[self.idx - 1] + timedelta(hours=self.dt)).isoformat(),
             "cost": cost,
+            "costs": rewards["costs"],
             "reward": reward,
             "rewards": rewards,
             "grid_kw": grid_kw,
@@ -209,15 +210,6 @@ class MicrogridEnv(gym.Env):
         return state, reward, terminated, False, info
 
     def _commit_step(self, pending):
-        for current, completed in zip(self.bess_list, pending.bess_list):
-            current.commit(completed)
-        for current, completed in zip(self.pv_list, pending.pv_list):
-            current.commit(completed)
-        for current, completed in zip(self.evse_list, pending.evse_list):
-            current.commit(completed)
-        self.grid.array_kw[:] = pending.grid.array_kw
-        self.grid.array_kvar[:] = pending.grid.array_kvar
-        self.results.commit(pending.results)
         for name in ("idx", "current_cost", "episode_reward", "current_grid_kw", "current_grid_kvar",
                      "current_bus_snapshot", "current_bus_voltages_pu", "current_bus_angles_deg", "current_voltages_pu",
                      "current_device_measurements", "current_branch_measurements", "previous_device_measurements",

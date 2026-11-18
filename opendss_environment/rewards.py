@@ -8,6 +8,8 @@ from .evse import utc_timestamp
 
 
 TERMS = {
+    "feeder_cost": "minimize_feeder_cost", "node_cost": "minimize_node_cost",
+    "device_cost": "minimize_device_cost",
     "energy_cost": "minimize_energy_cost", "voltage": "minimize_voltage_violation",
     "voltage_deviation": "minimize_voltage_deviation", "unbalance": "minimize_voltage_unbalance",
     "branch_overload": "minimize_branch_overload", "power_violation": "minimize_power_violation",
@@ -58,7 +60,8 @@ class Reward:
         objectives = deepcopy(objectives or {})
         if set(objectives) - set(self.controllers):
             raise ValueError("Objectives contain unknown controller IDs")
-        result = {"cost": self.minimize_cost(env), "controllers": {}, "terms": {}}
+        result = {"cost": self.minimize_cost(env), "controllers": {}, "terms": {},
+                  "costs": {"feeder": self.feeder_cost(env), "controllers": {}}}
         teacher = self._teacher_components(env)
         result["teacher"] = -(teacher["energy_cost"] + teacher["tie_break_cost"])
         result["teacher_terms"] = teacher
@@ -93,6 +96,10 @@ class Reward:
                                "weight": weight, "contribution": contribution}
             result["terms"][controller_id] = terms
             result["controllers"][controller_id] = _number(sum(value["contribution"] for value in terms.values()), "controller reward")
+            result["costs"]["controllers"][controller_id] = {
+                term.removesuffix("_cost"): -value["raw"] for term, value in terms.items()
+                if term in {"feeder_cost", "node_cost", "device_cost"} and value["weight"]
+            }
         return result
 
     @staticmethod
@@ -102,6 +109,12 @@ class Reward:
     @staticmethod
     def get_cost(rewards):
         return rewards["cost"]
+
+    @staticmethod
+    def get_costs(rewards, controller_id=None):
+        """Return unweighted currency costs; negative values are net revenue."""
+        costs = rewards["costs"]
+        return deepcopy(costs if controller_id is None else costs["controllers"][controller_id])
 
     @staticmethod
     def get_teacher(rewards):
@@ -161,6 +174,55 @@ class Reward:
     def minimize_cost(env):
         """Negative executed grid energy cost, in case currency."""
         return -env.current_cost
+
+    @staticmethod
+    def feeder_cost(env):
+        """Actual settlement at the external grid connection, in case currency."""
+        return float(env.current_cost)
+
+    def node_cost(self, env, buy_price=None, sell_price=None):
+        """Settle each selected node separately, including all its loads/devices."""
+        if self.scope is None and self.bus is None:
+            raise ValueError("Select buses for node cost")
+        powers = dict.fromkeys(self._buses(env), 0.0)
+        for flow in self._flows(env):
+            powers[flow["bus"]] -= flow["p_flow_pu"] * env.data["base_kva"]
+        source = env.data.get("grid_limits", {}).get("bus", "").lower()
+        if source in powers:
+            # Remove the external source contribution from the local node balance.
+            powers[source] -= env.current_grid_kw
+        return sum(self._settlement(env, power, buy_price, sell_price) for power in powers.values())
+
+    def device_cost(self, env, buy_price=None, sell_price=None, throughput_price=0.0, service_payment=0.0):
+        """Sum individual AC settlements plus storage wear proxy minus service payment."""
+        devices = self._devices(env)
+        if not devices:
+            raise ValueError("Select devices for device cost")
+        wear = _number(throughput_price, "throughput_price", 0.0)
+        payment = _number(service_payment, "service_payment", 0.0)
+        cost = 0.0
+        for kind, device in devices:
+            measured = env.current_device_measurements[kind][device.id]
+            power = -measured["generation_total_kw"] if kind == "pv" else measured["p_net_total_kw"]
+            cost += self._settlement(env, power, buy_price, sell_price)
+        if wear:
+            cost -= wear * self.minimize_throughput(env)
+        return cost - payment
+
+    @staticmethod
+    def _settlement(env, power, buy_price, sell_price):
+        buy = _number(env.grid.prices[env.idx] if buy_price is None else buy_price, "buy_price")
+        sell = _number(env.grid.sell_prices[env.idx] if sell_price is None else sell_price, "sell_price")
+        return (buy * max(power, 0.0) - sell * max(-power, 0.0)) * env.dt
+
+    def minimize_feeder_cost(self, env):
+        return -self.feeder_cost(env)
+
+    def minimize_node_cost(self, env, **parameters):
+        return -self.node_cost(env, **parameters)
+
+    def minimize_device_cost(self, env, **parameters):
+        return -self.device_cost(env, **parameters)
 
     def minimize_teacher_objective(self, env):
         """Negative per-interval teacher objective; powers are converted from pu to kW."""
