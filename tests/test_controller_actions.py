@@ -1,5 +1,6 @@
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -39,13 +40,31 @@ class ControllerActionsTest(unittest.TestCase):
         bess = env.controller_actions({"bess": ["b1"]})
         pv = env.controller_actions({"pv": ["pv1"]})
         first, second = bess.command([0.5, 0]), pv.command([-1, 0])
+        observation = env.observe()
         combined = env.compose_actions(first, second)
+        with patch.object(env, "observe", side_effect=AssertionError("Observation was already supplied")):
+            self.assertEqual(env.compose_actions(first, second, observation=observation), combined)
         self.assertEqual(combined.bess, first.bess)
         self.assertEqual(combined.pv, second.pv)
         env.step(combined)
         self.assertEqual(env.idx, 1)
         with self.assertRaisesRegex(ValueError, "Multiple controllers"):
             env.compose_actions(first, first)
+
+    def test_lean_info_matches_default_step_with_teacher_action(self):
+        action = {
+            "bess": {"b1": {"mode": "total", "p_net_pu": -0.02, "q_injection_pu": 0.01}},
+            "pv": {"pv1": {"mode": "total", "generation_pu": 0.02, "q_injection_pu": 0.0}},
+        }
+        full_env, lean_env = self.env(), self.env()
+        for _ in range(2):
+            *full, info = full_env.step(action)
+            *lean, lean_info = lean_env.step(action, full_info=False)
+            self.assertEqual(lean, full)
+            self.assertEqual(lean_info, {"rewards": info["rewards"]})
+            self.assertEqual(info["requested_action"]["bess"], action["bess"])
+            self.assertIn("executed_action", info)
+            self.assertIn("observation_before", info)
 
     def test_one_controller_can_select_multiple_device_types(self):
         env = self.env()

@@ -104,8 +104,9 @@ class MicrogridEnv(gym.Env):
             raise ValueError("Unknown or noncontrollable device in controller scope")
         return ControllerActions(selected, self.data["base_kva"], phases=self.data["phases"], seed=seed)
 
-    def compose_actions(self, *commands):
-        return compose_actions(self, commands)
+    def compose_actions(self, *commands, observation=None):
+        """Compose commands using the current observation if supplied."""
+        return compose_actions(self, commands, observation=observation)
 
     def _clear_episode_state(self):
         self.idx = 0
@@ -151,7 +152,8 @@ class MicrogridEnv(gym.Env):
 
         return state, {"observation": deepcopy(observation), "start_step": start, "episode_steps": self.steps}
 
-    def step(self, action=None):
+    def step(self, action=None, *, full_info=True):
+        """Advance one interval; full_info=False returns only rewards in info."""
         if self._needs_reset:
             raise RuntimeError("Call reset() before stepping, including after an execution failure")
         if self.idx >= self.steps:
@@ -160,7 +162,7 @@ class MicrogridEnv(gym.Env):
         checkpoint = StepCheckpoint(self)
         pending = self._copy_for_step()
         try:
-            result = pending._run_step(prepared)
+            result = pending._run_step(prepared, full_info=full_info)
         except BaseException:
             checkpoint.restore()
             # OpenDSS may have changed; reset rebuilds it before another attempt.
@@ -175,8 +177,8 @@ class MicrogridEnv(gym.Env):
         pending.reward_objectives = deepcopy(self.reward_objectives)
         return pending
 
-    def _run_step(self, prepared):
-        observation = self.observe()
+    def _run_step(self, prepared, *, full_info):
+        observation = self.observe() if full_info else None
         objectives = deepcopy(self.reward_objectives)
         applied_action = _update_snapshot_powers(self, prepared.physical)
         grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
@@ -222,7 +224,7 @@ class MicrogridEnv(gym.Env):
             "device_measurements": self.current_device_measurements,
             "observation": observation,  # Compatibility key for the pre-action observation.
             "observation_before": deepcopy(observation),
-        }
+        } if full_info else {"rewards": rewards}
 
         if terminated:
             state = None

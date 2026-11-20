@@ -50,8 +50,8 @@ class ControllerActions:
         return result
 
 
-def compose_actions(env, commands):
-    observation = env.observe()
+def compose_actions(env, commands, *, observation=None):
+    observation = env.observe() if observation is None else observation
     result = Action(
         bess={device.id: TotalAction(0.0) for device in env.bess_list},
         pv={device.id: PhaseAction(observation["pv"][device.id]["available_pu"])
