@@ -154,6 +154,7 @@ def load_data(path):
         "case_path": path,
         "config_path": config_path,
         "name": cfg.get("name", path.name),
+        "training_split": cfg.get("training_split", {}),
         "formulation": cfg.get("formulation"),
         "schema_version": cfg.get("schema_version", 1),
         "timestamps": timestamps,

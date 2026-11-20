@@ -8,6 +8,7 @@ from pu_normalizer import PUNormalizer
 
 from opendss_environment.backend import OpenDSSDirectBackend
 from opendss_environment.actions import prepare_action
+from opendss_environment.controller_actions import ControllerActions, compose_actions
 from opendss_environment.data import load_data, episode_data
 from opendss_environment.states import (
     build_controller_observation, build_local_observation,
@@ -49,7 +50,7 @@ class EnvironmentConfig:
 
 class MicrogridEnv(gym.Env):
 
-    def __init__(self, config):
+    def __init__(self, config, *, data=None):
         super().__init__()
         if not isinstance(config, EnvironmentConfig):
             raise TypeError("MicrogridEnv requires an EnvironmentConfig")
@@ -63,7 +64,7 @@ class MicrogridEnv(gym.Env):
         self.reward_function = config.reward_function
         self.end_episode = config.start_episode + config.num_episodes
 
-        self.data = load_data(config.case_path)
+        self.data = load_data(config.case_path) if data is None else copy(data)
         if config.start_step >= self.data["steps"]:
             raise ValueError("start_step must identify an interval in the dataset")
         self.data["start_step"] = config.start_step
@@ -91,6 +92,20 @@ class MicrogridEnv(gym.Env):
             "evse_list", "load_list", "results",
         ):
             setattr(self, name, episode[name])
+
+    def controller_actions(self, devices, *, seed=None):
+        available = {"bess": self.bess_list, "pv": self.pv_list,
+                     "evse": [device for device in self.evse_list if device.controlled]}
+        if set(devices) - set(available):
+            raise ValueError("Controller groups must be bess, pv or evse")
+        selected = {group: [device for device in available[group] if device.id in ids]
+                    for group, ids in devices.items()}
+        if any(set(devices[group]) != {device.id for device in items} for group, items in selected.items()):
+            raise ValueError("Unknown or noncontrollable device in controller scope")
+        return ControllerActions(selected, self.data["base_kva"], phases=self.data["phases"], seed=seed)
+
+    def compose_actions(self, *commands):
+        return compose_actions(self, commands)
 
     def _clear_episode_state(self):
         self.idx = 0

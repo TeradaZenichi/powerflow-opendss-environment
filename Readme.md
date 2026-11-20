@@ -75,6 +75,20 @@ For a selected dataset range, use
 The default offset is zero. With `episode_steps=None`, the episode includes
 all remaining rows after the offset.
 
+For repeated runs, load scenario data once and reuse it:
+
+```python
+from opendss_environment.data import load_data
+data = load_data(CASE_PATH)
+env = MicrogridEnv(EnvironmentConfig(CASE_PATH, episode_steps=96), data=data)
+```
+
+The optional `data` argument shares the loaded frames/profiles. Each environment
+owns a shallow copy of the dataset dictionary, its row offset, live devices,
+results and OpenDSS context. Treat shared source values as read-only and pass
+data from the same case as `EnvironmentConfig.case_path`. Without this argument,
+construction still loads the case normally.
+
 Run:
 
 ```

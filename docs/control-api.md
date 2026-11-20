@@ -60,6 +60,34 @@ every phase. Device CSVs add BESS/PV powers by phase. BESS charge/discharge
 columns and energy totals sum positive/negative phase powers separately, so
 opposite phase powers are visible even when total net power is zero.
 
+## Local controller action interfaces
+
+Select the devices owned by each controller, without wrapping or resetting the environment:
+
+```python
+first = env.controller_actions({"bess": ["b1"]}, seed=42)
+second = env.controller_actions({"pv": ["pv1"]}, seed=17)
+request_a = first.command(first.action_space.sample())
+request_b = second.command(second.action_space.sample())
+observation, reward, terminated, truncated, info = env.step(env.compose_actions(request_a, request_b))
+```
+
+Each interface exposes a normalized float32 `Box` in `[-1, 1]`. Coordinates are
+all P values followed by all Q values, using the selected device/phase order in
+`interface.devices`. Bounds come from device ratings; conversion produces pu
+commands. One interface can select multiple devices and types. EVSEs must be
+controlled; ASAP chargers are not action coordinates. Per-phase BESS/PV use
+phase coordinates; EVSE commands remain device totals. Dynamic SoC, availability
+and joint P/Q capability are still enforced by device physics, not by Box sampling.
+
+`compose_actions()` accepts partial `Action` objects from different controllers.
+It fills unassigned BESS/controlled EVSE with zero P/Q, keeps PV at available
+power and leaves ASAP EVSE automatic. It rejects overlapping ownership and
+unknown IDs. A coordinator calls `step()` once with the combined command.
+Keep normalized requested vectors in each learner's replay, not composed powers.
+The physical named API and the existing GymAdapter's physical vector format
+remain unchanged; MicrogridEnv does not expose a single global `action_space`.
+
 ## Optional Gymnasium adapter
 
 The named API remains unchanged. Use `GymAdapter` for flat numeric `Box` spaces:

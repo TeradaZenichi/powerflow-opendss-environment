@@ -12,6 +12,27 @@ CASE = Path(__file__).resolve().parents[1] / "examples" / "case5"
 
 
 class StartStepTest(unittest.TestCase):
+    def test_preloaded_data_shares_sources_but_not_offsets_or_physical_state(self):
+        data = load_data(CASE)
+        with patch("opendss_environment.microgrid_env.load_data", side_effect=AssertionError("Reloaded case")):
+            train = MicrogridEnv(EnvironmentConfig(CASE, 2), data=data)
+            evaluate = MicrogridEnv(EnvironmentConfig(CASE, 2, start_step=5), data=data)
+        self.addCleanup(train.close)
+        self.addCleanup(evaluate.close)
+        self.assertIs(train.data["demand"], data["demand"])
+        self.assertIs(evaluate.data["prices"], data["prices"])
+        self.assertIsNot(train.data, evaluate.data)
+        self.assertNotIn("start_step", data)
+        self.assertEqual((train.data["start_step"], evaluate.data["start_step"]), (0, 5))
+        train.reset()
+        before = train.observe()
+        evaluate.reset()
+        evaluate.step()
+        self.assertEqual(train.observe(), before)
+        self.assertIsNot(train.bess_list[0], evaluate.bess_list[0])
+        self.assertIsNot(train.results, evaluate.results)
+        self.assertIsNot(train.dss, evaluate.dss)
+
     def test_reset_selects_absolute_window_without_reloading_and_restores_defaults(self):
         with patch("opendss_environment.microgrid_env.load_data", wraps=load_data) as load:
             env = MicrogridEnv(EnvironmentConfig(CASE, 2, start_step=3, num_episodes=2))
