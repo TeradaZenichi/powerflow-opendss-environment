@@ -4,6 +4,7 @@ from gymnasium import spaces
 
 from .actions import Action, EVSEAction, PhaseAction, TotalAction
 from .network import device_phases
+from .states import _validated_observation
 
 
 class ControllerActions:
@@ -50,11 +51,16 @@ class ControllerActions:
         return result
 
 
-def compose_actions(env, commands):
-    observation = env.observe()
+def compose_actions(env, commands, *, observation=None):
+    if observation is None:
+        observation = env.observe()
+    else:
+        observation = _validated_observation(env, observation)
+        if observation["timestamp"] != env.timestamps.iloc[env.idx].isoformat():
+            raise ValueError("Observation must describe the current decision interval")
     result = Action(
         bess={device.id: TotalAction(0.0) for device in env.bess_list},
-        pv={device.id: PhaseAction(observation["pv"][device.id]["available_pu"])
+        pv={device.id: PhaseAction(observation["pv"][device.id]["available_pu"].copy())
             if device.dispatch_mode == "per_phase" else
             TotalAction(sum(observation["pv"][device.id]["available_pu"].values())) for device in env.pv_list},
         evse={device.id: EVSEAction(0.0) for device in env.evse_list if device.controlled},

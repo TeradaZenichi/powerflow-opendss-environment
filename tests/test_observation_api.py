@@ -2,6 +2,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -107,6 +108,33 @@ class ObservationApiTest(unittest.TestCase):
         self.assertEqual(reset_observation["timestamp"], before["timestamp"])
         self.assertEqual(reset_observation["bess"]["b1"]["soc_before_frac"], 0.5)
         self.assertEqual(env.bess_list[0].array_soc, [])
+
+    def test_reward_only_steps_reuse_current_observations_and_match_full_steps(self):
+        env = MicrogridEnv(EnvironmentConfig(CASE, 2))
+        self.addCleanup(env.close)
+        env.reset(seed=42)
+        actions = env.controller_actions({"bess": ["b1"]})
+        partial = actions.command([0.5, -0.2])
+        expected = []
+        for _ in range(2):
+            command = env.compose_actions(partial)
+            state, reward, terminated, truncated, info = env.step(command)
+            expected.append((command.as_dict(), (state, reward, terminated, truncated), info["rewards"]))
+        diagnostics = list(env.results.diagnostics)
+
+        state, _ = env.reset(seed=42)
+        first_observation = state
+        for expected_command, expected_step, expected_rewards in expected:
+            with patch.object(env, "observe", side_effect=AssertionError("Observation was rebuilt")):
+                command = env.compose_actions(partial, observation=state)
+            self.assertEqual(command.as_dict(), expected_command)
+            state, reward, terminated, truncated, info = env.step(command, full_info=False)
+            self.assertEqual((state, reward, terminated, truncated), expected_step)
+            self.assertEqual(info, {"rewards": expected_rewards})
+            if not terminated:
+                with self.assertRaisesRegex(ValueError, "current decision interval"):
+                    env.compose_actions(partial, observation=first_observation)
+        self.assertEqual(env.results.diagnostics, diagnostics)
 
     def test_explicit_state_functions_preserve_legacy_numeric_states(self):
         config = EnvironmentConfig(CASE, 2, (get_hour, get_bess_soc))

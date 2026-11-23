@@ -164,7 +164,7 @@ def build_named_observation(env):
         "bess": bess,
         "pv": pv,
     }
-    if env.evse_list:
+    if env.evse_list and env.config.observe_evse:
         timestamp = utc_timestamp(env.timestamps.iloc[env.idx])
         information = env.data["ev_session_information"]
         evse = {}

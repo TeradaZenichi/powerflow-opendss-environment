@@ -34,6 +34,7 @@ class EnvironmentConfig:
     start_episode: int = 0
     reward_function: object = Reward.minimize_cost
     start_step: int = 0
+    observe_evse: bool = True
 
     def __post_init__(self):
         if self.episode_steps is not None and (
@@ -104,8 +105,11 @@ class MicrogridEnv(gym.Env):
             raise ValueError("Unknown or noncontrollable device in controller scope")
         return ControllerActions(selected, self.data["base_kva"], phases=self.data["phases"], seed=seed)
 
-    def compose_actions(self, *commands):
-        return compose_actions(self, commands)
+    def compose_actions(self, *commands, observation=None):
+        """Complete device commands using an optional current observation."""
+        if observation is not None and (self._needs_reset or self.idx >= self.steps):
+            raise RuntimeError("Action composition requires an active episode")
+        return compose_actions(self, commands, observation=observation)
 
     def _clear_episode_state(self):
         self.idx = 0
@@ -151,7 +155,8 @@ class MicrogridEnv(gym.Env):
 
         return state, {"observation": deepcopy(observation), "start_step": start, "episode_steps": self.steps}
 
-    def step(self, action=None):
+    def step(self, action=None, *, full_info=True):
+        """Advance one interval. With full_info=False, info contains only rewards."""
         if self._needs_reset:
             raise RuntimeError("Call reset() before stepping, including after an execution failure")
         if self.idx >= self.steps:
@@ -160,7 +165,7 @@ class MicrogridEnv(gym.Env):
         checkpoint = StepCheckpoint(self)
         pending = self._copy_for_step()
         try:
-            result = pending._run_step(prepared)
+            result = pending._run_step(prepared, full_info=full_info)
         except BaseException:
             checkpoint.restore()
             # OpenDSS may have changed; reset rebuilds it before another attempt.
@@ -175,8 +180,8 @@ class MicrogridEnv(gym.Env):
         pending.reward_objectives = deepcopy(self.reward_objectives)
         return pending
 
-    def _run_step(self, prepared):
-        observation = self.observe()
+    def _run_step(self, prepared, *, full_info):
+        observation = self.observe() if full_info else None
         objectives = deepcopy(self.reward_objectives)
         applied_action = _update_snapshot_powers(self, prepared.physical)
         grid_kw, grid_kvar, cost = solve_power_flow(self, applied_action)
@@ -198,31 +203,33 @@ class MicrogridEnv(gym.Env):
         terminated = self.idx >= self.steps
 
         self.previous_device_measurements = self.current_device_measurements
-        info = {
-            "units": "pu",
-            "base": self.normalizer.as_dict()["base"],
-            "network": self.network.as_dict(),
-            "timestamp": self.timestamps.iloc[self.idx - 1],
-            "interval_end": (self.timestamps.iloc[self.idx - 1] + timedelta(hours=self.dt)).isoformat(),
-            "cost": cost,
-            "costs": rewards["costs"],
-            "reward": reward,
-            "rewards": rewards,
-            "grid_kw": grid_kw,
-            "grid_kvar": grid_kvar,
-            "grid_import_kw": max(-grid_kw, 0.0),
-            "grid_export_kw": max(grid_kw, 0.0),
-            "bus_voltages_pu": self.current_bus_voltages_pu,
-            "bus_voltages_v": self.current_bus_snapshot.volts,
-            "bus_angles_deg": self.current_bus_angles_deg,
-            "branch_measurements": self.current_branch_measurements,
-            "diagnostics": diagnostics,
-            "requested_action": prepared.requested,
-            "executed_action": applied_action,
-            "device_measurements": self.current_device_measurements,
-            "observation": observation,  # Compatibility key for the pre-action observation.
-            "observation_before": deepcopy(observation),
-        }
+        info = {"rewards": rewards}
+        if full_info:
+            info = {
+                "units": "pu",
+                "base": self.normalizer.as_dict()["base"],
+                "network": self.network.as_dict(),
+                "timestamp": self.timestamps.iloc[self.idx - 1],
+                "interval_end": (self.timestamps.iloc[self.idx - 1] + timedelta(hours=self.dt)).isoformat(),
+                "cost": cost,
+                "costs": rewards["costs"],
+                "reward": reward,
+                "rewards": rewards,
+                "grid_kw": grid_kw,
+                "grid_kvar": grid_kvar,
+                "grid_import_kw": max(-grid_kw, 0.0),
+                "grid_export_kw": max(grid_kw, 0.0),
+                "bus_voltages_pu": self.current_bus_voltages_pu,
+                "bus_voltages_v": self.current_bus_snapshot.volts,
+                "bus_angles_deg": self.current_bus_angles_deg,
+                "branch_measurements": self.current_branch_measurements,
+                "diagnostics": diagnostics,
+                "requested_action": prepared.requested,
+                "executed_action": applied_action,
+                "device_measurements": self.current_device_measurements,
+                "observation": observation,  # Compatibility key for the pre-action observation.
+                "observation_before": deepcopy(observation),
+            }
 
         if terminated:
             state = None

@@ -80,6 +80,17 @@ class ControllerActionsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "noncontrollable"):
             env.controller_actions({"evse": ["a1"]})
 
+    def test_phase_pv_defaults_do_not_mutate_the_reused_observation(self):
+        case = Path(__file__).parent / "fixtures/three_phase_volt_control/config_per_phase.json"
+        env = self.env(case)
+        observation = env.observe()
+        default = env.compose_actions(observation=observation)
+        pv_id, command = next(iter(default.pv.items()))
+        available = observation["pv"][pv_id]["available_pu"]
+        self.assertEqual(command.p_pu, available)
+        command.p_pu.clear()
+        self.assertTrue(available)
+
     def test_invalid_vectors_and_scopes_are_rejected(self):
         env = self.env()
         for selection in ({}, {"bess": ["missing"]}, {"loads": ["load"]}):
